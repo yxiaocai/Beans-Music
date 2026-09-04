@@ -33,9 +33,11 @@ struct RootView: View {
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var player: PlayerManager
     @EnvironmentObject private var favorites: FavoritesStore
+    @ObservedObject private var skinStore = AppSkinStore.shared
     @AppStorage("beans.themeMode") private var themeModeRaw = BeansThemeMode.system.rawValue
 
     @State private var selection: RootTab = .discover
+    @State private var appleSelection: AppleMusicTab = .listenNow
     @State private var showPlayer = false
     /// 免责声明确认状态（门禁在 BeansApp 中，这里用于确认后弹出更新说明）
     @AppStorage("beans.disclaimerAccepted") private var disclaimerAccepted = false
@@ -82,31 +84,38 @@ struct RootView: View {
 
     var body: some View {
         let _ = theme.accent
+        let _ = skinStore.skin
         ZStack {
             // 系统原生 TabView：iOS 26 上 UITabBar 自动使用原生液态玻璃，
             // 按压折射反馈、拖动效果、高光均由系统渲染（与应用商店等系统 App 一致）。
             // 背景（壁纸/背景色）由每个 tab 页面内部的 GlassBackdrop 渲染，
             // 因为系统 TabView 的内容层会盖住 RootView 底层的 ZStack 背景。
-            TabView(selection: $selection) {
-                DiscoverView()
-                    .tabItem { Label(tabLabelsVisible ? "主页" : "", systemImage: "house.fill") }
-                    .tag(RootTab.discover)
-                SearchView()
-                    .tabItem { Label(tabLabelsVisible ? "搜索" : "", systemImage: "magnifyingglass") }
-                    .tag(RootTab.search)
-                LibraryView()
-                    .tabItem { Label(tabLabelsVisible ? "音乐库" : "", systemImage: "music.note.list") }
-                    .tag(RootTab.library)
-                ProfileView()
-                    .tabItem { Label(tabLabelsVisible ? "我的" : "", systemImage: "person.crop.circle") }
-                    .tag(RootTab.profile)
-            }
-            .tint(Color.beansAmber)
-            .background {
-                TabBarAppearanceConfigurator(hidesSystemTabBarOnLegacy: !usesSystemFloatingTabBar)
+            Group {
+                if skinStore.isAppleMusic {
+                    AppleMusicRootTabs(selection: $appleSelection)
+                } else {
+                    TabView(selection: $selection) {
+                        DiscoverView()
+                            .tabItem { Label(tabLabelsVisible ? "主页" : "", systemImage: "house.fill") }
+                            .tag(RootTab.discover)
+                        SearchView()
+                            .tabItem { Label(tabLabelsVisible ? "搜索" : "", systemImage: "magnifyingglass") }
+                            .tag(RootTab.search)
+                        LibraryView()
+                            .tabItem { Label(tabLabelsVisible ? "音乐库" : "", systemImage: "music.note.list") }
+                            .tag(RootTab.library)
+                        ProfileView()
+                            .tabItem { Label(tabLabelsVisible ? "我的" : "", systemImage: "person.crop.circle") }
+                            .tag(RootTab.profile)
+                    }
+                    .tint(Color.beansAmber)
+                    .background {
+                        TabBarAppearanceConfigurator(hidesSystemTabBarOnLegacy: !usesSystemFloatingTabBar)
+                    }
+                }
             }
 
-            if !usesSystemFloatingTabBar {
+            if !usesSystemFloatingTabBar && !skinStore.isAppleMusic {
                 legacyFloatingTabBar
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .transition(.move(edge: .bottom).combined(with: .opacity))

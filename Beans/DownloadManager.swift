@@ -95,7 +95,11 @@ final class DownloadManager {
                 .replacingOccurrences(of: "/", with: "-")
                 .replacingOccurrences(of: ":", with: "-")
             let ext: String
-            if song.source == .qq {
+            if song.source == .catalog {
+                let playback = song.catalogPlaybackURL(quality: current == .low ? .standard : .exhigh)
+                let pathExt = playback?.pathExtension ?? ""
+                ext = pathExt.isEmpty ? (current == .low ? "m4a" : "mp3") : pathExt
+            } else if song.source == .qq {
                 ext = current == .lossless ? "flac" : "m4a"
             } else if song.source == .kugou {
                 ext = current == .lossless ? "flac" : "mp3"
@@ -116,6 +120,10 @@ final class DownloadManager {
     }
 
     private func resolveURL(song: Song, quality: DownloadQuality) async -> String? {
+        if song.source == .catalog {
+            let audioQuality: BeansAudioQuality = quality == .low ? .standard : .exhigh
+            return song.catalogPlaybackURL(quality: audioQuality)?.absoluteString
+        }
         if song.source == .qq, let mid = song.qqMid {
             return try? await QQMusicAPI.shared.songURL(songmid: mid, mediaMid: song.qqMediaMid, br: quality.qqBR)
         } else if song.source == .kugou {

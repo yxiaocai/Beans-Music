@@ -30,11 +30,12 @@ enum BeansAudioQuality: String, CaseIterable, Identifiable {
     }
 }
 
-/// 歌曲来源（网易云 / QQ音乐 / 酷狗音乐）
+/// 歌曲来源（网易云 / QQ音乐 / 酷狗音乐 / 导入曲库）
 enum SongSource: String, Codable, Sendable {
     case netease
     case qq
     case kugou
+    case catalog
 
     /// 兼容旧版本地收藏：未知或已下线来源统一回退为网易云
     init(from decoder: Decoder) throws {
@@ -63,10 +64,25 @@ struct Song: Identifiable, Hashable, Codable {
     let kugouQualityHashes: [String: String]?
     /// 付费/VIP 标记（网易云：0 免费、1 VIP、4 付费单曲；QQ：0 免费、非 0 付费）
     let fee: Int
+    /// 导入曲库字段（source == .catalog）
+    let catalogTrackID: String?
+    let catalogSourceID: String?
+    let audioURL: URL?
+    let hqAudioURL: URL?
+    let lyricsURL: URL?
+    let downloadURL: URL?
+    let qualityLabel: String?
 
     var formattedDuration: String {
         let total = max(0, Int(duration))
+        guard total > 0 else { return "" }
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    /// 列表副标题：有艺人显示艺人，否则显示专辑名
+    var displayArtist: String {
+        if !artists.isEmpty { return artists }
+        return album
     }
 
     /// 跨平台唯一标识（避免网易云与 QQ 音乐歌曲 id 撞车）
@@ -75,12 +91,11 @@ struct Song: Identifiable, Hashable, Codable {
         case .qq: return "qq-\(id)"
         case .kugou: return "kugou-\(id)"
         case .netease: return "netease-\(id)"
+        case .catalog: return "catalog-\(catalogTrackID ?? "\(id)")"
         }
     }
 
     /// 是否为 VIP / 付费歌曲（用于列表与播放器角标）
-    /// 网易云 fee：0 免费、1 VIP、4 付费单曲；8 为翻唱/免费资源，不视为 VIP
-    /// QQ payplay：0 免费，非 0 需要会员/付费
     var isVIP: Bool {
         switch source {
         case .netease:
@@ -89,10 +104,33 @@ struct Song: Identifiable, Hashable, Codable {
             return fee != 0
         case .kugou:
             return fee != 0
+        case .catalog:
+            return false
         }
     }
 
-    init(id: Int, name: String, artists: String, album: String, coverURL: URL?, duration: TimeInterval, source: SongSource = .netease, qqMid: String? = nil, qqMediaMid: String? = nil, kugouHash: String? = nil, kugouAlbumAudioId: String? = nil, kugouAlbumId: String? = nil, kugouQualityHashes: [String: String]? = nil, fee: Int = 0) {
+    /// 曲库直链：标准用 m4a，较高及以上优先 hq mp3
+    func catalogPlaybackURL(quality: BeansAudioQuality = .current) -> URL? {
+        let raw: URL?
+        if quality == .standard {
+            raw = audioURL ?? hqAudioURL
+        } else {
+            raw = hqAudioURL ?? audioURL
+        }
+        return raw.flatMap { CatalogParser.parseURL($0.absoluteString) } ?? raw
+    }
+
+    /// 对曲库 track_id 做稳定 Int id（FNV-1a 64）
+    static func stableID(from string: String) -> Int {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in string.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 1_099_511_628_211
+        }
+        return Int(bitPattern: UInt(truncatingIfNeeded: hash))
+    }
+
+    init(id: Int, name: String, artists: String, album: String, coverURL: URL?, duration: TimeInterval, source: SongSource = .netease, qqMid: String? = nil, qqMediaMid: String? = nil, kugouHash: String? = nil, kugouAlbumAudioId: String? = nil, kugouAlbumId: String? = nil, kugouQualityHashes: [String: String]? = nil, fee: Int = 0, catalogTrackID: String? = nil, catalogSourceID: String? = nil, audioURL: URL? = nil, hqAudioURL: URL? = nil, lyricsURL: URL? = nil, downloadURL: URL? = nil, qualityLabel: String? = nil) {
         self.id = id
         self.name = name
         self.artists = artists
@@ -107,6 +145,13 @@ struct Song: Identifiable, Hashable, Codable {
         self.kugouAlbumId = kugouAlbumId
         self.kugouQualityHashes = kugouQualityHashes
         self.fee = fee
+        self.catalogTrackID = catalogTrackID
+        self.catalogSourceID = catalogSourceID
+        self.audioURL = audioURL
+        self.hqAudioURL = hqAudioURL
+        self.lyricsURL = lyricsURL
+        self.downloadURL = downloadURL
+        self.qualityLabel = qualityLabel
     }
 
     init?(json: [String: Any]) {
@@ -137,9 +182,19 @@ struct Song: Identifiable, Hashable, Codable {
         kugouAlbumId = nil
         kugouQualityHashes = nil
         fee = json["fee"] as? Int ?? 0
+        catalogTrackID = nil
+        catalogSourceID = nil
+        audioURL = nil
+        hqAudioURL = nil
+        lyricsURL = nil
+        downloadURL = nil
+        qualityLabel = nil
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, fee }
+    private enum CodingKeys: String, CodingKey {
+        case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, fee
+        case catalogTrackID, catalogSourceID, audioURL, hqAudioURL, lyricsURL, downloadURL, qualityLabel
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -157,6 +212,13 @@ struct Song: Identifiable, Hashable, Codable {
         kugouAlbumId = try c.decodeIfPresent(String.self, forKey: .kugouAlbumId)
         kugouQualityHashes = try c.decodeIfPresent([String: String].self, forKey: .kugouQualityHashes)
         fee = try c.decodeIfPresent(Int.self, forKey: .fee) ?? 0
+        catalogTrackID = try c.decodeIfPresent(String.self, forKey: .catalogTrackID)
+        catalogSourceID = try c.decodeIfPresent(String.self, forKey: .catalogSourceID)
+        audioURL = try c.decodeIfPresent(URL.self, forKey: .audioURL)
+        hqAudioURL = try c.decodeIfPresent(URL.self, forKey: .hqAudioURL)
+        lyricsURL = try c.decodeIfPresent(URL.self, forKey: .lyricsURL)
+        downloadURL = try c.decodeIfPresent(URL.self, forKey: .downloadURL)
+        qualityLabel = try c.decodeIfPresent(String.self, forKey: .qualityLabel)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -175,6 +237,13 @@ struct Song: Identifiable, Hashable, Codable {
         try c.encodeIfPresent(kugouAlbumId, forKey: .kugouAlbumId)
         try c.encodeIfPresent(kugouQualityHashes, forKey: .kugouQualityHashes)
         try c.encode(fee, forKey: .fee)
+        try c.encodeIfPresent(catalogTrackID, forKey: .catalogTrackID)
+        try c.encodeIfPresent(catalogSourceID, forKey: .catalogSourceID)
+        try c.encodeIfPresent(audioURL, forKey: .audioURL)
+        try c.encodeIfPresent(hqAudioURL, forKey: .hqAudioURL)
+        try c.encodeIfPresent(lyricsURL, forKey: .lyricsURL)
+        try c.encodeIfPresent(downloadURL, forKey: .downloadURL)
+        try c.encodeIfPresent(qualityLabel, forKey: .qualityLabel)
     }
 }
 

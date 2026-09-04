@@ -146,6 +146,9 @@ struct LocalPlaylistDetailSheet: View {
                                     }
                                 }
                             }
+                            .onMove { offsets, destination in
+                                store.moveSongs(playlistID: playlistID, from: offsets, to: destination)
+                            }
                         }
                     }
                     .listStyle(.plain)
@@ -158,6 +161,9 @@ struct LocalPlaylistDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("完成") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    EditButton()
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
@@ -191,9 +197,7 @@ struct LocalPlaylistDetailSheet: View {
             }
         }
         .sheet(isPresented: $showSearchAdd) {
-            LocalSearchAddSheet(playlistID: playlistID)
-                .environmentObject(player)
-                .environmentObject(auth)
+            CatalogSongPickerSheet(playlistID: playlistID)
         }
         .alert("重命名歌单", isPresented: $showRename) {
             TextField("歌单名称", text: $renameText)

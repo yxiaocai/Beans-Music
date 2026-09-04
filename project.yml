@@ -38,6 +38,11 @@ targets:
         CADisableMinimumFrameDurationOnPhone: true
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: JSON Catalog
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.json
 
 schemes:
   Beans:

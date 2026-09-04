@@ -4,6 +4,7 @@ struct MiniPlayerView: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var player: PlayerManager
     @EnvironmentObject private var clock: PlaybackClock
+    @ObservedObject private var skinStore = AppSkinStore.shared
     @Binding var showPlayer: Bool
     @State private var miniLyrics: [LyricLine] = []
     @AppStorage("beans.lyricOffset") private var lyricOffset = 0.0
@@ -90,23 +91,27 @@ struct MiniPlayerView: View {
             .padding(.trailing, 6)
             .padding(.vertical, 8)
             .background {
-                // iOS 26 原生液态玻璃：背景 + 高光 + 描边三层
-                                BeansGlass(shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .overlay {
-                    LinearGradient(
-                        colors: [.white.opacity(0.25), .clear, .white.opacity(0.05)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(
+                if skinStore.isAppleMusic {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                } else {
+                    BeansGlass(shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay {
                             LinearGradient(
-                                colors: [.white.opacity(0.45), .white.opacity(0.08)],
-                                startPoint: .top, endPoint: .bottom
-                            ),
-                            lineWidth: 0.8
-                        )
+                                colors: [.white.opacity(0.25), .clear, .white.opacity(0.05)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        }
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .strokeBorder(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.45), .white.opacity(0.08)],
+                                        startPoint: .top, endPoint: .bottom
+                                    ),
+                                    lineWidth: 0.8
+                                )
+                        }
                 }
             }
             .overlay(alignment: .bottom) {
@@ -131,7 +136,9 @@ struct MiniPlayerView: View {
         guard let song = player.currentSong else { return }
         let identity = song.identityKey
         var raw: String?
-        if song.source == .kugou, let hash = song.kugouHash {
+        if song.source == .catalog {
+            raw = await CatalogLyricLoader.load(from: song.lyricsURL)
+        } else if song.source == .kugou, let hash = song.kugouHash {
             raw = await KugouMusicAPI.shared.lyric(hash: hash, duration: song.duration)
         } else if song.source == .qq, let mid = song.qqMid {
             raw = try? await QQMusicAPI.shared.lyric(songmid: mid)

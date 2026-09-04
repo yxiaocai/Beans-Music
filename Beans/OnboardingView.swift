@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - 首次使用引导页（分页引导 + 免责确认）
 
-/// 首次进入 App 时的引导式提示：欢迎 → DIY 美化 → 三平台 → 免责确认。
+/// 首次进入 App 时的引导式提示：欢迎 → DIY 美化 → 曲库导入 → 免责确认。
 /// 免责确认沿用原硬性要求：必须输入「我已了解并同意继续使用」才能进入软件。
 struct OnboardingView: View {
     let onFinish: () -> Void
@@ -26,7 +26,7 @@ struct OnboardingView: View {
                 TabView(selection: $page) {
                     welcomePage.tag(0)
                     diyPage.tag(1)
-                    platformPage.tag(2)
+                    catalogPage.tag(2)
                     disclaimerPage.tag(3)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
@@ -167,7 +167,7 @@ struct OnboardingView: View {
                 .font(BeansFont.appFont(30, .bold))
                 .foregroundStyle(Color.beansLabel)
 
-            Text("iOS 26 原生液态玻璃 · 聚合网易云 / QQ / 酷狗\n纯 SwiftUI · 完全开源")
+            Text("导入 catalog.json，建立自己的曲库和歌单\n纯 SwiftUI · 完全开源")
                 .font(BeansFont.appFont(15))
                 .foregroundStyle(Color.beansSecondary)
                 .multilineTextAlignment(.center)
@@ -250,72 +250,39 @@ struct OnboardingView: View {
         .beansCardShadow(radius: 8, y: 3)
     }
 
-    // MARK: 第 3 页 · 三平台
+    // MARK: 第 3 页 · 曲库导入
 
-    private var platformPage: some View {
+    private var catalogPage: some View {
         VStack(spacing: 20) {
             Spacer()
-            Image(systemName: "arrow.left.arrow.right")
+            Image(systemName: "square.and.arrow.down.on.square")
                 .font(.system(size: 40))
                 .foregroundStyle(LinearGradient.beansAccent)
 
-            Text("三平台聚合，一个 App 全听遍")
+            Text("导入曲库，马上开听")
                 .font(BeansFont.appFont(26, .bold))
                 .foregroundStyle(Color.beansLabel)
 
-            Text("网易云 + QQ 音乐 + 酷狗歌单同步")
+            Text("支持多份 catalog.json，本地文件或在线 URL")
                 .font(BeansFont.appFont(14))
                 .foregroundStyle(Color.beansSecondary)
 
             VStack(spacing: 12) {
-                platformRow(imageName: "BrandNetease", tint: Color(red: 0.87, green: 0.23, blue: 0.23),
-                            title: "网易云音乐",
-                            detail: "扫码 / 网页登录，同步歌单、收藏、听歌排行、VIP")
-                platformRow(imageName: "BrandQQ", tint: Color(red: 0.13, green: 0.51, blue: 0.95),
-                            title: "QQ 音乐",
-                            detail: "扫码 / 网页 / Cookie 登录，同步歌单与 VIP")
-                platformRow(imageName: "BrandKugou", tint: Color(red: 0.12, green: 0.55, blue: 1.0),
-                            title: "酷狗音乐",
-                            detail: "登录同步云端歌单，并支持酷狗歌曲搜索")
+                diyRow(icon: "doc.badge.plus", tint: Color.beansHighlight,
+                       title: "本地 JSON",
+                       detail: "从文件 App 选择 catalog.json 导入")
+                diyRow(icon: "link", tint: .beansSage,
+                       title: "在线 URL",
+                       detail: "粘贴地址下载，可随时手动刷新")
+                diyRow(icon: "music.note.list", tint: Color(red: 0.39, green: 0.71, blue: 0.96),
+                       title: "自建歌单",
+                       detail: "从已导入歌曲里挑选，保存在本机")
             }
             .padding(.horizontal, 28)
 
             Spacer()
             Spacer()
         }
-    }
-
-    private func platformRow(imageName: String, tint: Color, title: String, detail: String) -> some View {
-        HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(tint.opacity(0.16))
-                .frame(width: 46, height: 46)
-                .overlay(
-                    Image(imageName)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 30, height: 30)
-                )
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(BeansFont.appFont(15, .bold))
-                    .foregroundStyle(Color.beansLabel)
-                Text(detail)
-                    .font(BeansFont.appFont(12))
-                    .foregroundStyle(Color.beansSecondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.beansCard.opacity(0.75))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.beansLabel.opacity(0.08), lineWidth: 1)
-        )
-        .beansCardShadow(radius: 8, y: 3)
     }
 
     // MARK: 第 4 页 · 免责确认
@@ -333,9 +300,8 @@ struct OnboardingView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("· Beans Music 只用作个人学习研究，禁止用于商业及非法用途，如产生法律纠纷与本人无关。")
-                Text("· 音乐 API 来自于 GitHub 开源项目（非官方版 API），本软件不提供任何音频存储服务，如需下载音频，请支持正版！")
-                Text("· 音乐版权归各网站所有，本站不承担任何法律责任和连带责任。")
-                Text("· “酷狗音乐”、酷狗图形标识及相关音乐内容的著作权、商标权或其他权利归酷狗音乐及其相关权利方所有。")
+                Text("· 本软件不提供音频存储服务。曲库中的音频、歌词与封面由你导入的 JSON 所指向的地址提供。")
+                Text("· 请确保你有权使用所导入的音乐资源，并支持正版。")
             }
             .font(BeansFont.appFont(13))
             .foregroundStyle(Color.beansSecondary)

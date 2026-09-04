@@ -73,6 +73,11 @@ final class LocalLibraryStore: ObservableObject {
         playlists[idx].songs.removeAll { $0.identityKey == songIdentity }
     }
 
+    func moveSongs(playlistID: UUID, from offsets: IndexSet, to destination: Int) {
+        guard let idx = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
+        playlists[idx].songs.move(fromOffsets: offsets, toOffset: destination)
+    }
+
     private func save() {
         if let data = try? JSONEncoder().encode(playlists) {
             defaults.set(data, forKey: key)

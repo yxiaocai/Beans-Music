@@ -28,6 +28,17 @@ struct BeansApp: App {
                     .environmentObject(player)
                     .environmentObject(theme)
                     .environmentObject(favorites)
+                    .environmentObject(CatalogStore.shared)
+                    .environmentObject(AppSkinStore.shared)
+                    .onOpenURL { url in
+                        guard url.pathExtension.lowercased() == "json" else { return }
+                        do {
+                            _ = try CatalogStore.shared.importFile(from: url, displayName: nil, defaultArtist: "")
+                            ToastCenter.shared.show("已导入曲库")
+                        } catch {
+                            ToastCenter.shared.show(error.localizedDescription)
+                        }
+                    }
                 // 未确认前展示首次使用引导页（分页引导 + 免责确认）
                 if !disclaimerAccepted {
                     OnboardingView { disclaimerAccepted = true }

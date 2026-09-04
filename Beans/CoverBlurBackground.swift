@@ -121,7 +121,7 @@ final class CoverBlurView: UIView {
     }
 
     func load(url: URL?) {
-        guard let url else {
+        guard let url = url.flatMap({ CatalogParser.parseURL($0.absoluteString) }) ?? url else {
             imageView.image = nil
             return
         }
@@ -135,21 +135,33 @@ final class CoverBlurView: UIView {
             return
         }
 
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let self, let data, let source = UIImage(data: data) else { return }
-            Self.blurQueue.async {
-                let blurred = Self.makeBlurredImage(source)
-                let colors = Self.extractGradientColors(from: source)
-                if let blurred {
-                    Self.imageCache.setObject(blurred, forKey: url as NSURL)
-                }
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.currentURL == url else { return }
-                    if let blurred { self.setImage(blurred, animated: true) }
-                    self.applyGradient(colors)
-                }
+        if let original = CoverImageCache.shared.memoryImage(for: url) {
+            blurAndShow(original, for: url, animated: false)
+            return
+        }
+
+        Task { [weak self] in
+            let original = try? await CoverImageCache.shared.image(for: url)
+            await MainActor.run {
+                guard let self, self.currentURL == url, let original else { return }
+                self.blurAndShow(original, for: url, animated: true)
             }
-        }.resume()
+        }
+    }
+
+    private func blurAndShow(_ source: UIImage, for url: URL, animated: Bool) {
+        Self.blurQueue.async { [weak self] in
+            let blurred = Self.makeBlurredImage(source)
+            let colors = Self.extractGradientColors(from: source)
+            if let blurred {
+                Self.imageCache.setObject(blurred, forKey: url as NSURL)
+            }
+            DispatchQueue.main.async {
+                guard let self, self.currentURL == url else { return }
+                if let blurred { self.setImage(blurred, animated: animated) }
+                self.applyGradient(colors)
+            }
+        }
     }
 
     /// 应用封面主色渐变（带过渡动画）

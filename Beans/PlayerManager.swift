@@ -370,7 +370,9 @@ final class PlayerManager: NSObject, ObservableObject {
             let strictUnlock = shouldLockOfficialOnly(song)
             let quality = BeansAudioQuality.current
             BeansLogger.shared.log("▶ 开始播放：\(song.name) - \(song.artists)｜平台=\(song.source.rawValue) id=\(song.id) 音质=\(quality.level) 免费听歌=\(enableUnblock ? "开" : "关") 官方受限=\(strictUnlock ? "是" : "否")", level: .info)
-            if song.source == .kugou {
+            if song.source == .catalog {
+                urlString = song.catalogPlaybackURL(quality: quality)?.absoluteString
+            } else if song.source == .kugou {
                 urlString = try? await KugouMusicAPI.shared.songURL(song: song)
                 if urlString == nil {
                     resolvedThirdParty = await kugouFallback(song: song, enableUnblock: enableUnblock)
@@ -720,6 +722,8 @@ final class PlayerManager: NSObject, ObservableObject {
                 return false
             }
             return user.vipBadge != nil
+        case .catalog:
+            return false
         }
     }
 

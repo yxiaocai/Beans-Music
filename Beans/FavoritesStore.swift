@@ -9,14 +9,20 @@ final class FavoritesStore: ObservableObject {
     @Published private(set) var qqFavoriteSongs: [Song] = []
     /// 网易云红心收藏（本地缓存 + 云端同步）
     @Published private(set) var neteaseFavoriteSongs: [Song] = []
+    /// 曲库本机红心
+    @Published private(set) var catalogFavoriteSongs: [Song] = []
+
+    var likedSongs: [Song] { catalogFavoriteSongs }
 
     private let defaults = UserDefaults.standard
     private let neteaseKey = "beans.fav.netease.v1"
     private let qqKey = "beans.fav.qq.v1"
+    private let catalogKey = "beans.fav.catalog.v1"
 
     private init() {
         qqFavoriteSongs = Self.loadSongs(qqKey)
         neteaseFavoriteSongs = Self.loadSongs(neteaseKey)
+        catalogFavoriteSongs = Self.loadSongs(catalogKey)
     }
 
     /// 该歌曲是否已收藏
@@ -30,6 +36,8 @@ final class FavoritesStore: ObservableObject {
             return qqFavoriteSongs.contains { $0.qqMid == mid }
         case .kugou:
             return false
+        case .catalog:
+            return catalogFavoriteSongs.contains { $0.identityKey == song.identityKey }
         }
     }
 
@@ -65,6 +73,10 @@ final class FavoritesStore: ObservableObject {
             return true
         case .kugou:
             return false
+        case .catalog:
+            let liked = !isLiked(song)
+            updateCatalog(song, liked: liked)
+            return true
         }
     }
 
@@ -81,6 +93,20 @@ final class FavoritesStore: ObservableObject {
             neteaseFavoriteSongs.removeAll { $0.id == song.id }
         }
         saveSongs(neteaseFavoriteSongs, key: neteaseKey)
+    }
+
+    private func updateCatalog(_ song: Song, liked: Bool) {
+        if liked {
+            catalogFavoriteSongs.removeAll { $0.identityKey == song.identityKey }
+            catalogFavoriteSongs.insert(song, at: 0)
+        } else {
+            catalogFavoriteSongs.removeAll { $0.identityKey == song.identityKey }
+        }
+        saveSongs(catalogFavoriteSongs, key: catalogKey)
+    }
+
+    func removeCatalogFavorite(_ song: Song) {
+        updateCatalog(song, liked: false)
     }
 
     private func updateQQ(_ song: Song, liked: Bool) {

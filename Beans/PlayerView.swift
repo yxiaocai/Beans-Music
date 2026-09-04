@@ -40,16 +40,16 @@ struct PlayerView: View {
     @AppStorage("beans.djVisualIntensity") private var djVisualIntensity = 0.8
     @State private var dominantColor: RGBColor?
     @Namespace private var coverNS
-    @AppStorage("beans.lyricFontSize") private var lyricFontSize = 17
-    @AppStorage("beans.lyricColor") private var lyricColorRaw = "accent"
-    @AppStorage("beans.lyricDimColor") private var lyricDimColorRaw = "dim"
-    @AppStorage("beans.lyricGlow") private var lyricGlowLevel = 1
+    @AppStorage("beans.lyricFontSize") private var lyricFontSize = 24
+    @AppStorage("beans.lyricColor") private var lyricColorRaw = "white"
+    @AppStorage("beans.lyricDimColor") private var lyricDimColorRaw = "white"
+    @AppStorage("beans.lyricGlow") private var lyricGlowLevel = 0
     @AppStorage("beans.lyricGradStart") private var lyricGradStartRaw = ""
     @AppStorage("beans.lyricGradEnd") private var lyricGradEndRaw = ""
     /// 渐变模式：0=跟随封面自动取色（默认），1=始终保持用户自定义渐变
     @AppStorage("beans.lyricGradMode") private var lyricGradMode = 0
-    /// 歌词行距（14~40，默认 24）
-    @AppStorage("beans.lyricSpacing") private var lyricLineSpacing = 24
+    /// 歌词行距（14~40，默认 32）
+    @AppStorage("beans.lyricSpacing") private var lyricLineSpacing = 32
     /// 播放器氛围：背景流动开关 / 速度 / 呼吸光晕强度
     @AppStorage("beans.playerBreath") private var playerBreath = 0.6
     /// 播放控件颜色是否跟随封面主色；关闭后使用全局主题色
@@ -162,9 +162,9 @@ struct PlayerView: View {
         player.isPlaying && !showPlayerSettings
     }
 
-    /// 当前行歌词颜色（可自定义；配色模式关闭时自动跟随封面取色）
+    /// 当前行歌词颜色：默认白字加粗；仅在「保持自定义配色」时用用户选色
     private var lyricCurrentColor: Color {
-        guard lyricGradMode == 1 else { return palette.accent }
+        guard lyricGradMode == 1 else { return .white }
         switch lyricColorRaw {
         case "white": return .white
         case "amber": return Color.beansAmber
@@ -173,21 +173,21 @@ struct PlayerView: View {
         case "green": return Color(red: 0.42, green: 0.90, blue: 0.62)
         default:
             if lyricColorRaw.hasPrefix("#"), let c = Color(hex: lyricColorRaw) { return c }
-            return palette.accent
+            return .white
         }
     }
 
-    /// 未播放歌词颜色（可自定义；配色模式关闭时自动跟随封面取色）
+    /// 未播放歌词：默认半透明白；自定义配色开启时用用户选色
     private var lyricDimColor: Color {
-        guard lyricGradMode == 1 else { return palette.secondary }
+        guard lyricGradMode == 1 else { return .white.opacity(0.42) }
         switch lyricDimColorRaw {
-        case "white": return .white.opacity(0.78)
+        case "white": return .white.opacity(0.45)
         case "bluegray": return Color(red: 0.72, green: 0.78, blue: 0.86)
         case "gray": return Color.gray.opacity(0.85)
         case "dark": return Color.black.opacity(0.55)
         default:
             if lyricDimColorRaw.hasPrefix("#"), let c = Color(hex: lyricDimColorRaw) { return c }
-            return palette.secondary
+            return .white.opacity(0.42)
         }
     }
 
@@ -311,6 +311,7 @@ struct PlayerView: View {
             if let path = LyricBackgroundStore.restoreFromBackup(), lyricBackgroundImagePath != path {
                 lyricBackgroundImagePath = path
             }
+            migrateLyricStyleIfNeeded()
         }
         .sheet(isPresented: $showQueue) { QueueView().environmentObject(player) }
         .sheet(isPresented: $showSleepTimer) { SleepTimerSheet().environmentObject(player) }
@@ -406,6 +407,10 @@ struct PlayerView: View {
                     : [.white.opacity(0.08), .clear, .black.opacity(0.12)],
                 startPoint: .top, endPoint: .bottom
             )
+            // 歌词页压一层深灰，保证白字可读，同时仍透出封面主色
+            if showLyrics {
+                Color.black.opacity(0.46)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -864,7 +869,7 @@ struct PlayerView: View {
                     HStack(spacing: 5) {
                         Text(song?.name ?? "")
                             .font(BeansFont.appFont(14, .semibold))
-                            .foregroundStyle(palette.text)
+                            .foregroundStyle(Color.white)
                             .lineLimit(1)
                             .truncationMode(.tail)
                         if song?.isVIP == true {
@@ -878,7 +883,7 @@ struct PlayerView: View {
                     }
                     Text(song?.artists ?? "")
                         .font(BeansFont.appFont(12))
-                        .foregroundStyle(palette.secondary)
+                        .foregroundStyle(Color.white.opacity(0.62))
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .contentShape(Rectangle())
@@ -892,7 +897,7 @@ struct PlayerView: View {
                 } label: {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(palette.secondary)
+                        .foregroundStyle(Color.white.opacity(0.7))
                         .frame(width: 34, height: 34)
                         .background {
                                                         BeansGlass(shape: Circle())
@@ -1024,7 +1029,7 @@ struct PlayerView: View {
                         })
                     : AnyGesture(DragGesture(minimumDistance: 25)
                         .onEnded { value in
-                            if value.translation.height < -50, song != nil {
+                            if value.translation.height < -50, song != nil, song?.source != .catalog {
                                 BeansHaptics.medium()
                                 showComments = true
                             }
@@ -1399,6 +1404,8 @@ struct PlayerView: View {
         case .kugou:
             let encoded = song.name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? song.name
             return URL(string: "https://www.kugou.com/yy/html/search.html#searchType=song&searchKeyWord=\(encoded)")
+        case .catalog:
+            return song.audioURL
         }
     }
 
@@ -1447,6 +1454,7 @@ struct PlayerView: View {
     }
 
     private func openArtistHome() {
+        guard song?.source != .catalog else { return }
         guard !primaryArtistName.isEmpty else { return }
         BeansHaptics.tap()
         if artistNames.count > 1 {
@@ -1522,7 +1530,11 @@ struct PlayerView: View {
             guard self.song?.identityKey == identity else { return }
             self.lyrics = parsed
         }
-        if song.source == .kugou, let hash = song.kugouHash {
+        if song.source == .catalog {
+            if let raw = await CatalogLyricLoader.load(from: song.lyricsURL) {
+                apply(LyricParser.parse(raw))
+            }
+        } else if song.source == .kugou, let hash = song.kugouHash {
             let raw = await KugouMusicAPI.shared.lyric(hash: hash, duration: song.duration)
             apply(LyricParser.parse(raw))
         } else if song.source == .qq, let mid = song.qqMid {
@@ -1534,6 +1546,18 @@ struct PlayerView: View {
                 apply(LyricParser.parse(lrc ?? "", translationRaw: tlyric))
             }
         }
+    }
+
+    /// 把旧默认（17 号 + 封面色光晕）迁到白字加粗、更大字号；已手动改过的设置不覆盖
+    private func migrateLyricStyleIfNeeded() {
+        let key = "beans.lyricStyle.v2"
+        guard UserDefaults.standard.object(forKey: key) == nil else { return }
+        if lyricFontSize <= 17 { lyricFontSize = 24 }
+        if lyricLineSpacing <= 24 { lyricLineSpacing = 32 }
+        if lyricGlowLevel == 1 { lyricGlowLevel = 0 }
+        if lyricColorRaw == "accent" { lyricColorRaw = "white" }
+        if lyricDimColorRaw == "dim" { lyricDimColorRaw = "white" }
+        UserDefaults.standard.set(true, forKey: key)
     }
 
     /// 一次性提取当前封面主色，带动整个播放器配色动态变化（失败时保持主题回退色，不影响任何功能）
@@ -1832,9 +1856,9 @@ struct LyricsSection: View {
     let secondary: Color
     var gradientStart: Color? = nil
     var gradientEnd: Color? = nil
-    var baseFontSize: CGFloat = 17
-    var lineSpacing: CGFloat = 24
-    var glowRadius: CGFloat = 9
+    var baseFontSize: CGFloat = 24
+    var lineSpacing: CGFloat = 32
+    var glowRadius: CGFloat = 0
     /// 显示歌词翻译（当前行下方小字）
     var showTranslation: Bool = false
     /// 歌词对齐样式（居中 / 居左）
@@ -1992,16 +2016,16 @@ struct LyricsSection: View {
         // 模糊起始距离与强度由用户控制（0 强度 = 完全关闭模糊）
         let blurRadius: CGFloat = isCurrent ? 0 : min(CGFloat(max(distance - Int(blurStart), 0)) * blurAmount, 6.0)
 
-        // 当前行用渐变（封面色或自定义），光晕跟随渐变起始色
+        // 当前行白字加粗，不再用封面色渐变和蓝色光晕
         let lineStyle: AnyShapeStyle
-        if isCurrent, let gradientStart, let gradientEnd {
+        if isCurrent, glowRadius > 0, let gradientStart, let gradientEnd {
             lineStyle = AnyShapeStyle(LinearGradient(colors: [gradientStart, gradientEnd], startPoint: .top, endPoint: .bottom))
         } else {
             lineStyle = AnyShapeStyle(isCurrent ? accent : secondary)
         }
         let glowColor = glowColorOverride ?? (gradientStart ?? accent)
 
-        let lineFont: Font = BeansFont.appFont(size)
+        let lineFont: Font = BeansFont.appFont(size, isCurrent ? .bold : .regular)
         // 翻译行：仅当前行展示（借鉴 Kumone 的歌词翻译显示）
         let translationText = (isCurrent && showTranslation) ? line.translation : nil
 
@@ -2009,18 +2033,17 @@ struct LyricsSection: View {
             Text(line.text.isEmpty ? " " : line.text)
                 .font(lineFont)
                 .foregroundStyle(lineStyle)
-                // 双层光晕：内层亮、外层宽，发光更明显
                 .shadow(
-                    color: isCurrent ? glowColor.opacity(glowRadius > 0 ? 0.9 : 0) : .clear,
-                    radius: isCurrent ? glowRadius * 0.45 : 0
+                    color: isCurrent && glowRadius > 0 ? glowColor.opacity(0.9) : .clear,
+                    radius: isCurrent && glowRadius > 0 ? glowRadius * 0.45 : 0
                 )
                 .shadow(
-                    color: isCurrent ? glowColor.opacity(glowRadius > 0 ? 0.55 : 0) : .clear,
-                    radius: isCurrent ? glowRadius : 0
+                    color: isCurrent && glowRadius > 0 ? glowColor.opacity(0.55) : .clear,
+                    radius: isCurrent && glowRadius > 0 ? glowRadius : 0
                 )
                 .blur(radius: blurRadius)
                 .opacity(max(opacity, 0.15))
-                .scaleEffect(isCurrent ? 1.05 : 1)
+                .scaleEffect(isCurrent ? 1.06 : 1)
                 .multilineTextAlignment(alignment == .leading ? .leading : .center)
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
@@ -2139,11 +2162,11 @@ struct PlayerSettingsSheet: View {
     @AppStorage("beans.playerControlsUseCoverColor") private var controlsUseCoverColor = true
     @AppStorage("beans.progressBarStyle") private var progressBarStyle = 0
     @AppStorage("beans.progressAccentHex") private var progressAccentHex = ""
-    @AppStorage("beans.lyricFontSize") private var fontSize = 17
-    @AppStorage("beans.lyricSpacing") private var lineSpacing = 24
-    @AppStorage("beans.lyricGlow") private var glowLevel = 1
-    @AppStorage("beans.lyricColor") private var currentColorRaw = "accent"
-    @AppStorage("beans.lyricDimColor") private var dimColorRaw = "dim"
+    @AppStorage("beans.lyricFontSize") private var fontSize = 24
+    @AppStorage("beans.lyricSpacing") private var lineSpacing = 32
+    @AppStorage("beans.lyricGlow") private var glowLevel = 0
+    @AppStorage("beans.lyricColor") private var currentColorRaw = "white"
+    @AppStorage("beans.lyricDimColor") private var dimColorRaw = "white"
     @AppStorage("beans.lyricGradStart") private var gradStartRaw = ""
     @AppStorage("beans.lyricGradEnd") private var gradEndRaw = ""
     @AppStorage("beans.lyricGradMode") private var gradMode = 0

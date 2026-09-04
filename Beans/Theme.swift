@@ -36,6 +36,9 @@ extension UIColor {
     )
     /// 全局着色（跟随配色主题：浅色用深色调保证对比度，深色用亮色调保证可读性）
     static var beansAmber: UIColor {
+        if AppSkinStore.shared.skin == .appleMusic {
+            return AppSkin.applePinkUI
+        }
         if let custom = ThemeStore.shared.customAccentHex, let c = UIColor(hex: custom) {
             return beansDynamic(light: c.shaded(0.25), dark: c)
         }

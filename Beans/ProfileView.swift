@@ -85,7 +85,7 @@ struct ProfileView: View {
                 Text("我的")
                     .font(BeansFont.appFont(30, .bold))
                     .foregroundStyle(Color.beansLabel)
-                Text("\(platformPrefs.summaryText) 账号与外观设置")
+                Text("曲库导入、外观与播放设置")
                     .font(BeansFont.appFont(13))
                     .foregroundStyle(Color.beansComment)
             }
@@ -115,10 +115,12 @@ struct ProfileView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     header
                     // 板块按用户自定义顺序渲染（可拖拽排序）
+                    CatalogSourcesSection()
+                    featuresGrid
                     ForEach(profileOrder, id: \.self) { key in
                         switch key {
                         case "账号":
-                            userCard
+                            EmptyView()
                         case "关于":
                             aboutSection
                         default:
@@ -413,10 +415,6 @@ struct ProfileView: View {
                 featureCell(icon: "clock.arrow.circlepath", title: "播放历史", subtitle: "最近播放 \(player.history.count) 首") {
                     showHistory = true
                 }
-                featureCell(icon: hasVisibleAccountLogin ? "checkmark.seal.fill" : "globe", title: "账号与登录", subtitle: hasVisibleAccountLogin ? accountStatusLine : "登录 \(platformPrefs.summaryText)") {
-                    BeansHaptics.tap()
-                    showAccountHub = true
-                }
             }
         }
     }
@@ -469,7 +467,7 @@ struct ProfileView: View {
                     Text("软件使用说明")
                         .font(BeansFont.appFont(15, .semibold))
                         .foregroundStyle(Color.beansLabel)
-                    Text("了解多平台切换、账号、播放与个性化玩法")
+                    Text("了解曲库导入、歌单、播放与个性化玩法")
                         .font(BeansFont.appFont(11))
                         .foregroundStyle(Color.beansComment)
                 }
@@ -494,7 +492,7 @@ struct ProfileView: View {
                 Label(appVersionText, systemImage: "beats.headphones")
                     .font(BeansFont.appFont(14, .semibold))
                     .foregroundStyle(Color.beansLabel)
-                Text("网易云 / QQ音乐 / 酷狗音乐 第三方客户端 · 仅供学习研究")
+                Text("本地 / URL 曲库播放器 · 仅供学习研究")
                     .font(BeansFont.appFont(12))
                     .foregroundStyle(Color.beansComment)
                     .multilineTextAlignment(.center)
@@ -1001,6 +999,7 @@ struct SettingsView: View {
     @AppStorage("beans.labelColorHex") private var labelColorHex = ""
     @ObservedObject private var sourceStore = UnblockSourceStore.shared
     @ObservedObject private var platformPrefs = PlatformPreferenceStore.shared
+    @ObservedObject private var skinStore = AppSkinStore.shared
 
     @State private var appearanceExpanded = false
     @State private var platformExpanded = false
@@ -1037,8 +1036,8 @@ struct SettingsView: View {
                 GlassBackdrop(customColor: theme.backgroundSyncAll ? theme.customBackground : nil)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
+                        skinSection
                         appearanceSection
-                        platformSection
                         playbackSection
                         changelogSection
                         backupSection
@@ -1177,6 +1176,51 @@ struct SettingsView: View {
                         BeansGlass(shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var skinSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "界面风格")
+            VStack(spacing: 0) {
+                ForEach(AppSkin.allCases) { item in
+                    Button {
+                        BeansHaptics.select()
+                        skinStore.skin = item
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: item.icon)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.beansAmber)
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title)
+                                    .font(BeansFont.appFont(15, .medium))
+                                    .foregroundStyle(Color.beansLabel)
+                                Text(item.subtitle)
+                                    .font(BeansFont.appFont(11))
+                                    .foregroundStyle(Color.beansComment)
+                            }
+                            Spacer()
+                            if skinStore.skin == item {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(Color.beansAmber)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if item != AppSkin.allCases.last {
+                        Divider().overlay(Color.beansComment.opacity(0.12))
+                    }
+                }
+            }
+            .background {
+                BeansGlass(shape: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
     }
@@ -1574,7 +1618,7 @@ struct SettingsView: View {
                         Text("播放设置")
                             .font(BeansFont.appFont(15))
                             .foregroundStyle(Color.beansLabel)
-                        Text("\(BeansAudioQuality(rawValue: audioQualityRaw)?.displayName ?? "高品质") · \(enableBuiltInSources ? "内置音源已开" : "内置音源已关")")
+                        Text("\(BeansAudioQuality(rawValue: audioQualityRaw)?.displayName ?? "高品质") · 曲库直链")
                             .font(BeansFont.appFont(11))
                             .foregroundStyle(Color.beansComment)
                             .lineLimit(1)
@@ -1611,7 +1655,7 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text("无损与 Hi-Res 需要黑胶 VIP，未开通时自动回落到可用音质")
+                    Text("曲库：标准使用 m4a，较高及以上优先 hq mp3，没有则回落")
                         .font(BeansFont.appFont(11))
                         .foregroundStyle(Color.beansComment)
                 }
@@ -1660,77 +1704,6 @@ struct SettingsView: View {
                 }
                 .toggleStyle(.switch)
                 .tint(Color.beansAmber)
-
-                Divider().overlay(Color.beansComment.opacity(0.15))
-
-                Toggle(isOn: $enableBuiltInSources) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "externaldrive.connected.to.line.below")
-                            .font(.system(size: 14))
-                        .foregroundStyle(Color.beansAmber)
-                        .frame(width: 28)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("使用内置音源")
-                                .font(BeansFont.appFont(15))
-                                .foregroundStyle(Color.beansLabel)
-                            Text("仅在官方地址不可用或为试听片段时回退到预设")
-                                .font(BeansFont.appFont(11))
-                                .foregroundStyle(Color.beansComment)
-                        }
-                    }
-                }
-                .toggleStyle(.switch)
-                .tint(Color.beansAmber)
-
-                Toggle(isOn: $showThirdPartyVIPNotice) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "bell.badge.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.beansAmber)
-                            .frame(width: 28)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("第三方播放会员歌提醒")
-                                .font(BeansFont.appFont(15))
-                                .foregroundStyle(Color.beansLabel)
-                            Text("未识别到对应会员且会员歌曲通过内置音源播放成功时提示")
-                                .font(BeansFont.appFont(11))
-                                .foregroundStyle(Color.beansComment)
-                        }
-                    }
-                }
-                .toggleStyle(.switch)
-                .tint(Color.beansAmber)
-
-                HStack(spacing: 10) {
-                    Image(systemName: "shippingbox.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color.beansAmber)
-                    Text("内置音源预设")
-                        .font(BeansFont.appFont(13, .semibold))
-                        .foregroundStyle(Color.beansLabel)
-                    Spacer()
-                    Text("\(presetSourceCount) 个")
-                        .font(BeansFont.appFont(12))
-                        .foregroundStyle(Color.beansComment)
-                }
-
-                ForEach(sourceStore.presetSources) { source in
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(source.name)
-                                .font(BeansFont.appFont(13, .medium))
-                                .foregroundStyle(Color.beansLabel)
-                                .lineLimit(1)
-                            Text("内置预设 · \(source.kind.replacingOccurrences(of: "paid-", with: "").uppercased())")
-                                .font(BeansFont.appFont(10))
-                                .foregroundStyle(Color.beansComment)
-                        }
-                        Spacer()
-                        Toggle("", isOn: sourceEnabledBinding(source.id))
-                            .labelsHidden()
-                            .tint(Color.beansAmber)
-                    }
-                }
 
             }
             .padding(16)
