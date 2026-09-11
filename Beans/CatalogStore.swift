@@ -238,16 +238,20 @@ enum CatalogParser {
 }
 
 enum CatalogLyricLoader {
-    static func load(from url: URL?) async -> String? {
+    static func load(from url: URL?, identity: String) async -> String? {
+        if let cached = MediaCacheStore.shared.lyrics(identity: identity), !cached.isEmpty {
+            return cached
+        }
         guard let url else { return nil }
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 return nil
             }
-            if let text = String(data: data, encoding: .utf8), !text.isEmpty { return text }
-            if let text = String(data: data, encoding: .utf16), !text.isEmpty { return text }
-            return nil
+            let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16)
+            guard let text, !text.isEmpty else { return nil }
+            MediaCacheStore.shared.saveLyrics(text, identity: identity)
+            return text
         } catch {
             return nil
         }

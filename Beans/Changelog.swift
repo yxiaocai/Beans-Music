@@ -319,7 +319,7 @@ struct UsageGuideSheet: View {
         (
             "应用简介",
             "music.note.house.fill",
-            ["Beans Music 是一款聚合网易云音乐、QQ 音乐与酷狗音乐歌单同步能力的第三方音乐播放器客户端，仅供个人学习研究使用。"]
+            ["BMusic 是一款基于 catalog.json 导入的本地 / URL 曲库播放器，仅供个人学习研究使用。"]
         ),
         (
             "多平台切换",
@@ -374,7 +374,7 @@ struct UsageGuideSheet: View {
                             }
                             .beansCardShadow(radius: 8, y: 3)
                         }
-                        Text("Beans Music · 仅供学习交流 · 音乐版权归各平台所有 · 酷狗音乐名称及图标归酷狗音乐 / 腾讯音乐娱乐相关权利方所有")
+                        Text("BMusic · 仅供学习交流")
                             .font(BeansFont.appFont(11))
                             .foregroundStyle(Color.beansComment.opacity(0.8))
                             .multilineTextAlignment(.center)

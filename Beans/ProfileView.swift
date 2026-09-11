@@ -3,12 +3,6 @@ import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
 
-/// 自动下载新版 IPA 的结果
-enum DownloadOutcome {
-    case success(fileName: String)
-    case failure(message: String)
-}
-
 struct ProfileView: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var auth: AuthStore
@@ -21,23 +15,8 @@ struct ProfileView: View {
     @State private var showAccountHub = false
     /// 设置页（外观 + 歌词翻译等）
     @State private var showSettings = false
-    @State private var showSectionSort = false
-    /// 我的界面板块顺序（账号 / 关于，可自定义）
-    @State private var profileOrder = SectionOrderStore.load(SectionOrderStore.profileKey, defaults: SectionOrderStore.profileDefaults)
     /// 软件使用说明
     @State private var showUsageGuide = false
-    /// 手动检查更新
-    @State private var checkingUpdate = false
-    @State private var updateResult: UpdateChecker.CheckResult?
-    @State private var showUpdateResult = false
-    /// 自动下载新版 IPA
-    @ObservedObject private var ipaDownloader = IPADownloader.shared
-    @State private var showDownloadOverlay = false
-    @State private var downloadOutcome: DownloadOutcome?
-    @State private var showDownloadOutcome = false
-    @State private var pendingUpdateInfo: UpdateChecker.ReleaseInfo?
-    @State private var updateShareFile: ShareFileItem?
-    @State private var updateShareFileURL: URL?
     @State private var didRefreshProfileAccount = false
     @ObservedObject private var qqAuth = QQMusicAuth.shared
     @ObservedObject private var kugouAuth = KugouMusicAuth.shared
@@ -45,11 +24,6 @@ struct ProfileView: View {
 
     private var themeMode: BeansThemeMode {
         BeansThemeMode(rawValue: themeModeRaw) ?? .system
-    }
-
-    private var appVersionText: String {
-        let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2"
-        return "Beans Music · \(ver)"
     }
 
     /// 登录状态的合并提示（展示各平台真实昵称）
@@ -91,10 +65,6 @@ struct ProfileView: View {
             }
             Spacer()
             HStack(spacing: 10) {
-                GlassIconButton(systemName: "arrow.up.arrow.down") {
-                    BeansHaptics.tap()
-                    showSectionSort = true
-                }
                 GlassIconButton(systemName: "gearshape.fill") {
                     BeansHaptics.tap()
                     showSettings = true
@@ -117,19 +87,6 @@ struct ProfileView: View {
                     // 板块按用户自定义顺序渲染（可拖拽排序）
                     CatalogSourcesSection()
                     featuresGrid
-                    ForEach(profileOrder, id: \.self) { key in
-                        switch key {
-                        case "账号":
-                            EmptyView()
-                        case "关于":
-                            aboutSection
-                        default:
-                            EmptyView()
-                        }
-                    }
-                    // 更新入口固定放在“我的”页面最底部，避免被板块排序隐藏。
-                    updateLinkCard
-                    communityCard
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -160,102 +117,9 @@ struct ProfileView: View {
                 .environmentObject(theme)
                 .environmentObject(player)
         }
-        .sheet(isPresented: $showSectionSort) {
-            SectionOrderSheet(title: "我的板块排序", sections: SectionOrderStore.profileDefaults, order: $profileOrder)
-                .onDisappear { SectionOrderStore.save(SectionOrderStore.profileKey, profileOrder) }
-        }
         .sheet(isPresented: $showUsageGuide) {
             UsageGuideSheet()
         }
-        .sheet(item: $updateShareFile, onDismiss: cleanupUpdateShareFile) { item in
-            ShareSheet(items: [item.url])
-        }
-        .alert("检查更新", isPresented: $showUpdateResult, presenting: updateResult) { result in
-            switch result {
-            case .update(let info):
-                Button("立即更新") { UIApplication.shared.open(info.htmlURL) }
-                Button("取消", role: .cancel) {}
-            case .upToDate:
-                Button("好", role: .cancel) {}
-            case .failed:
-                Button("好", role: .cancel) {}
-            }
-        } message: { result in
-            switch result {
-            case .update(let info):
-                Text("发现新版本 \(info.version)，是否前往 GitHub 下载更新？")
-            case .upToDate:
-                Text("当前已是最新版本 \(UpdateChecker.currentVersion)")
-            case .failed:
-                Text("检查失败，请检查网络后重试\n如果长时间无反应，可能需要特殊网络环境（代理 / VPN）才能访问 GitHub")
-            }
-        }
-        .overlay {
-            if showDownloadOverlay { downloadProgressOverlay }
-        }
-        .alert("下载新版", isPresented: $showDownloadOutcome, presenting: downloadOutcome) { outcome in
-            switch outcome {
-            case .success:
-                Button("好", role: .cancel) {}
-            case .failure:
-                Button("好", role: .cancel) {}
-                Button("前往更新页") {
-                    if let info = pendingUpdateInfo {
-                        UIApplication.shared.open(info.htmlURL)
-                    }
-                }
-            }
-        } message: { outcome in
-            switch outcome {
-            case .success(let fileName):
-                Text("新版 IPA 已下载完成，但未能打开分享面板。\n文件名：\(fileName)")
-            case .failure(let message):
-                Text("下载失败：\(message)\n如果长时间无反应，可能需要特殊网络环境（代理 / VPN）才能访问 GitHub")
-            }
-        }
-    }
-
-    /// 下载进度浮层（居中卡片，兼容所有系统版本）
-    private var downloadProgressOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.35).ignoresSafeArea()
-            VStack(spacing: 14) {
-                HStack(spacing: 10) {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(Color.beansHighlight)
-                    Text("正在下载新版 IPA")
-                        .font(BeansFont.appFont(15, .semibold))
-                        .foregroundStyle(Color.beansLabel)
-                }
-                if ipaDownloader.progress >= 0 {
-                    ProgressView(value: ipaDownloader.progress)
-                        .progressViewStyle(.linear)
-                        .tint(Color.beansAmber)
-                    Text("\(Int(ipaDownloader.progress * 100))%")
-                        .font(BeansFont.appFont(12))
-                        .foregroundStyle(Color.beansComment)
-                } else {
-                    ProgressView()
-                        .tint(Color.beansAmber)
-                    Text("正在连接下载服务器…")
-                        .font(BeansFont.appFont(12))
-                        .foregroundStyle(Color.beansComment)
-                }
-                Text("下载完成后将自动打开系统分享面板")
-                    .font(BeansFont.appFont(11))
-                    .foregroundStyle(Color.beansComment.opacity(0.8))
-                    .multilineTextAlignment(.center)
-            }
-            .padding(22)
-            .frame(maxWidth: 300)
-            .background {
-                BeansGlass(shape: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            }
-            .beansCardShadow(radius: 12, y: 6)
-            .padding(32)
-        }
-        .transition(.opacity)
     }
 
     private var userCard: some View {
@@ -482,226 +346,6 @@ struct ProfileView: View {
             }
         }
         .buttonStyle(.plain)
-        .beansCardShadow(radius: 9, y: 3)
-    }
-
-    private var aboutSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "关于")
-            VStack(spacing: 8) {
-                Label(appVersionText, systemImage: "beats.headphones")
-                    .font(BeansFont.appFont(14, .semibold))
-                    .foregroundStyle(Color.beansLabel)
-                Text("本地 / URL 曲库播放器 · 仅供学习研究")
-                    .font(BeansFont.appFont(12))
-                    .foregroundStyle(Color.beansComment)
-                    .multilineTextAlignment(.center)
-                Text("只用作个人学习研究，禁止用于商业及非法用途，如产生法律纠纷与本人无关")
-                    .font(BeansFont.appFont(11))
-                    .foregroundStyle(Color.beansComment.opacity(0.85))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("本软件完全免费，全部功能开源 · GitHub：XIaodou0416/Beans-Music")
-                    .font(BeansFont.appFont(11, .semibold))
-                    .foregroundStyle(Color.beansAmber)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(16)
-            .background {
-                                BeansGlass(shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            }
-            .beansCardShadow(radius: 9, y: 3)
-
-            copyrightDisclosure
-
-        }
-    }
-
-    /// 版权声明（默认折叠，可展开查看）
-    private var copyrightDisclosure: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("“QQ”、“QQ音乐”及企鹅形象等文字、图形和商业标识，其著作权或商标权归腾讯公司所有。QQ音乐享有对其平台授权音乐的版权，请勿随意下载、复制版权内容。具体内容请参考QQ音乐用户协议。")
-                Text("“网易云”、“网易云音乐”等文字、图形和商业标识，其著作权或商标权归网易所有。网易云音乐享有对其平台授权音乐的版权，请勿随意下载、复制版权内容。具体内容请参考网易云音乐用户协议。")
-                Text("“酷狗音乐”及其名称、图形和商业标识归酷狗音乐及相关权利方所有。酷狗音乐享有对其平台授权音乐的版权，请勿随意下载、复制版权内容。具体内容请参考酷狗音乐用户协议。")
-                Text("音乐 API 来自 GitHub 开源项目，非官方版 API；本软件不提供任何音频存储服务，如需下载音频，请支持正版！")
-            }
-            .font(BeansFont.appFont(11))
-            .foregroundStyle(Color.beansComment)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 6)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.beansAmber)
-                    .frame(width: 26)
-                Text("版权声明")
-                    .font(BeansFont.appFont(14, .semibold))
-                    .foregroundStyle(Color.beansLabel)
-                Spacer()
-            }
-            .padding(.vertical, 2)
-        }
-        .tint(Color.beansAmber)
-        .padding(16)
-        .background {
-                            BeansGlass(shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        }
-        .beansCardShadow(radius: 9, y: 3)
-    }
-
-    /// 自动下载新版 IPA（带进度浮层）
-    private func startAutoDownload(info: UpdateChecker.ReleaseInfo, assetURL: URL) {
-        showDownloadOverlay = true
-        Task {
-            do {
-                let url = try await ipaDownloader.download(assetURL: assetURL, version: info.version)
-                await MainActor.run {
-                    showDownloadOverlay = false
-                    updateShareFileURL = url
-                    updateShareFile = ShareFileItem(url: url)
-                }
-            } catch {
-                await MainActor.run {
-                    showDownloadOverlay = false
-                    downloadOutcome = .failure(message: error.localizedDescription)
-                    showDownloadOutcome = true
-                }
-            }
-        }
-    }
-
-    private func cleanupUpdateShareFile() {
-        guard let url = updateShareFileURL else { return }
-        try? FileManager.default.removeItem(at: url)
-        updateShareFile = nil
-        updateShareFileURL = nil
-    }
-
-    /// 更新地址 + 检查更新（GitHub 项目，可点击交互）
-    private var updateLinkCard: some View {
-        VStack(spacing: 0) {
-            Button {
-                BeansHaptics.tap()
-                if let url = URL(string: "https://github.com/XIaodou0416/Beans-Music") {
-                    UIApplication.shared.open(url)
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color.beansHighlight)
-                        .frame(width: 26)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("更新地址")
-                            .font(BeansFont.appFont(14, .semibold))
-                            .foregroundStyle(Color.beansLabel)
-                        Text("GitHub：XIaodou0416/Beans-Music")
-                            .font(BeansFont.appFont(11))
-                            .foregroundStyle(Color.beansComment)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.beansComment)
-                }
-                .padding(16)
-            }
-            .buttonStyle(.plain)
-
-            Divider()
-                .overlay(Color.beansComment.opacity(0.16))
-                .padding(.horizontal, 16)
-
-            Button {
-                BeansHaptics.tap()
-                guard !checkingUpdate else { return }
-                checkingUpdate = true
-                Task {
-                    let result = await UpdateChecker.checkNow()
-                    await MainActor.run {
-                        checkingUpdate = false
-                        updateResult = result
-                        if case .update(let info) = result {
-                            // 发现新版：自动下载 IPA（无安装包时回退到更新提示）
-                            pendingUpdateInfo = info
-                            if let assetURL = info.assetURL {
-                                startAutoDownload(info: info, assetURL: assetURL)
-                            } else {
-                                showUpdateResult = true
-                            }
-                        } else {
-                            showUpdateResult = true
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: checkingUpdate ? "arrow.triangle.2.circlepath" : "checkmark.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color.beansHighlight)
-                        .frame(width: 26)
-                        .rotationEffect(.degrees(checkingUpdate ? 360 : 0))
-                        .animation(checkingUpdate ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: checkingUpdate)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(checkingUpdate ? "正在检查…" : "检查更新")
-                            .font(BeansFont.appFont(14, .semibold))
-                            .foregroundStyle(Color.beansLabel)
-                        Text("检测 GitHub 最新版本")
-                            .font(BeansFont.appFont(11))
-                            .foregroundStyle(Color.beansComment)
-                    }
-                    Spacer()
-                }
-                .padding(16)
-            }
-            .buttonStyle(.plain)
-            .disabled(checkingUpdate)
-        }
-        .background {
-            BeansGlass(shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        }
-        .beansCardShadow(radius: 9, y: 3)
-    }
-
-    /// 我的页底部交流群入口
-    private var communityCard: some View {
-        Button {
-            BeansHaptics.tap()
-            if let url = URL(string: "https://t.me/+k8oYhsIU4sgzOTM1") {
-                UIApplication.shared.open(url)
-            }
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "person.2.fill")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Color.beansHighlight)
-                    .frame(width: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("交流群")
-                        .font(BeansFont.appFont(14, .semibold))
-                        .foregroundStyle(Color.beansLabel)
-                    Text("点击跳转 Telegram")
-                        .font(BeansFont.appFont(11))
-                        .foregroundStyle(Color.beansComment)
-                }
-                Spacer()
-                Image(systemName: "arrow.up.forward.app")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.beansComment)
-            }
-            .padding(16)
-            .background {
-                BeansGlass(shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            }
-        }
-        .buttonStyle(GlassPressButtonStyle(scale: 0.98))
         .beansCardShadow(radius: 9, y: 3)
     }
 }
@@ -1000,6 +644,8 @@ struct SettingsView: View {
     @ObservedObject private var sourceStore = UnblockSourceStore.shared
     @ObservedObject private var platformPrefs = PlatformPreferenceStore.shared
     @ObservedObject private var skinStore = AppSkinStore.shared
+    @ObservedObject private var mediaCache = MediaCacheStore.shared
+    @AppStorage("beans.mediaCache.limitMB") private var mediaCacheLimitMB = MediaCacheStore.defaultLimitMB
 
     @State private var appearanceExpanded = false
     @State private var platformExpanded = false
@@ -1662,6 +1308,45 @@ struct SettingsView: View {
 
                 Divider().overlay(Color.beansComment.opacity(0.15))
 
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "externaldrive")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color.beansAmber)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("媒体缓存")
+                                .font(BeansFont.appFont(15))
+                                .foregroundStyle(Color.beansLabel)
+                            Text("已用 \(mediaCache.usedDescription) · 听过的歌和歌词会留下")
+                                .font(BeansFont.appFont(11))
+                                .foregroundStyle(Color.beansComment)
+                        }
+                    }
+                    Picker("缓存上限", selection: $mediaCacheLimitMB) {
+                        ForEach(MediaCacheStore.limitChoices, id: \.self) { mb in
+                            Text(mb >= 1024 ? "\(mb / 1024) GB" : "\(mb) MB").tag(mb)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: mediaCacheLimitMB) { _ in
+                        mediaCache.applyLimitChange()
+                    }
+                    Text("超出上限时删除最久没听的；30 天未播放也会清理")
+                        .font(BeansFont.appFont(11))
+                        .foregroundStyle(Color.beansComment)
+                    Button {
+                        mediaCache.clearAll()
+                        ToastCenter.shared.show("已清除媒体缓存")
+                    } label: {
+                        Text("清除缓存")
+                            .font(BeansFont.appFont(13, .medium))
+                            .foregroundStyle(Color.beansAmber)
+                    }
+                }
+
+                Divider().overlay(Color.beansComment.opacity(0.15))
+
                 Toggle(isOn: $mixesWithOthers) {
                     HStack(spacing: 12) {
                         Image(systemName: "speaker.wave.2.fill")
@@ -1922,7 +1607,7 @@ struct SettingsView: View {
         }
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         payload["beans.backup.meta"] = [
-            "app": "Beans Music",
+            "app": "BMusic",
             "created": ISO8601DateFormatter().string(from: Date()),
             "version": version,
             "includedAccounts": includeAccounts,
@@ -2179,7 +1864,7 @@ struct SettingsView: View {
 
     private var footerNote: some View {
         VStack(spacing: 6) {
-            Text("Beans Music · 仅供学习交流，纯 AI 实现此应用")
+            Text("BMusic · 仅供学习交流")
                 .font(BeansFont.appFont(11))
                 .foregroundStyle(Color.beansComment.opacity(0.7))
             Text("接入网易云音乐、QQ 音乐等公开接口")

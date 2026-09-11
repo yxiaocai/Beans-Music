@@ -470,7 +470,7 @@ struct PlayerView: View {
                         .font(BeansFont.appFont(12, .semibold))
                         .foregroundStyle(palette.secondary)
                         .lineLimit(1)
-                    Text(song?.album ?? "Beans Music")
+                    Text(song?.album ?? "BMusic")
                         .font(BeansFont.appFont(10))
                         .foregroundStyle(palette.secondary.opacity(0.85))
                         .lineLimit(1)
@@ -1531,7 +1531,7 @@ struct PlayerView: View {
             self.lyrics = parsed
         }
         if song.source == .catalog {
-            if let raw = await CatalogLyricLoader.load(from: song.lyricsURL) {
+            if let raw = await CatalogLyricLoader.load(from: song.lyricsURL, identity: song.identityKey) {
                 apply(LyricParser.parse(raw))
             }
         } else if song.source == .kugou, let hash = song.kugouHash {

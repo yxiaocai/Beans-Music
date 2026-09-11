@@ -266,8 +266,10 @@ final class ThemeStore: ObservableObject {
         backgroundImagePath = UserDefaults.standard.string(forKey: backgroundImageKey) ?? ""
         wallpaperPaths = UserDefaults.standard.stringArray(forKey: wallpaperListKey) ?? []
         uiStyle = BeansUIStyle(rawValue: UserDefaults.standard.string(forKey: uiStyleKey) ?? "") ?? .liquid
-        // 自动恢复壁纸（覆盖安装/数据迁移后：文件仍在用文件，文件丢失用 base64 备份重建）
-        restoreWallpapers()
+        // 壁纸恢复可能解码 base64，放到首帧之后，避免卡住启动画面
+        DispatchQueue.main.async { [weak self] in
+            self?.restoreWallpapers()
+        }
     }
 
     /// 壁纸自动恢复：

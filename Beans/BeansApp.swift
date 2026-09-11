@@ -22,26 +22,28 @@ struct BeansApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                RootView()
-                    .environmentObject(auth)
-                    .environmentObject(player)
-                    .environmentObject(theme)
-                    .environmentObject(favorites)
-                    .environmentObject(CatalogStore.shared)
-                    .environmentObject(AppSkinStore.shared)
-                    .onOpenURL { url in
-                        guard url.pathExtension.lowercased() == "json" else { return }
-                        do {
-                            _ = try CatalogStore.shared.importFile(from: url, displayName: nil, defaultArtist: "")
-                            ToastCenter.shared.show("已导入曲库")
-                        } catch {
-                            ToastCenter.shared.show(error.localizedDescription)
+            Group {
+                if disclaimerAccepted {
+                    RootView()
+                        .environmentObject(auth)
+                        .environmentObject(player)
+                        .environmentObject(theme)
+                        .environmentObject(favorites)
+                        .environmentObject(CatalogStore.shared)
+                        .environmentObject(AppSkinStore.shared)
+                        .onOpenURL { url in
+                            guard url.pathExtension.lowercased() == "json" else { return }
+                            do {
+                                _ = try CatalogStore.shared.importFile(from: url, displayName: nil, defaultArtist: "")
+                                ToastCenter.shared.show("已导入曲库")
+                            } catch {
+                                ToastCenter.shared.show(error.localizedDescription)
+                            }
                         }
-                    }
-                // 未确认前展示首次使用引导页（分页引导 + 免责确认）
-                if !disclaimerAccepted {
+                } else {
+                    // 首次启动只画引导页，不创建主界面四 Tab，避免冷启动卡几秒
                     OnboardingView { disclaimerAccepted = true }
+                        .environmentObject(theme)
                 }
             }
         }

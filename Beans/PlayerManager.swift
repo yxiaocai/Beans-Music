@@ -371,7 +371,21 @@ final class PlayerManager: NSObject, ObservableObject {
             let quality = BeansAudioQuality.current
             BeansLogger.shared.log("▶ 开始播放：\(song.name) - \(song.artists)｜平台=\(song.source.rawValue) id=\(song.id) 音质=\(quality.level) 免费听歌=\(enableUnblock ? "开" : "关") 官方受限=\(strictUnlock ? "是" : "否")", level: .info)
             if song.source == .catalog {
-                urlString = song.catalogPlaybackURL(quality: quality)?.absoluteString
+                let remote = song.catalogPlaybackURL(quality: quality)
+                let local = MediaCacheStore.shared.audioFileURL(identity: song.identityKey, quality: quality)
+                await MainActor.run {
+                    guard generation == self.loadGeneration else { return }
+                    if let local {
+                        self.setupPlayer(url: local)
+                    } else if let remote {
+                        self.setupPlayer(url: remote)
+                        MediaCacheStore.shared.prefetchAudio(from: remote, identity: song.identityKey, quality: quality)
+                    } else {
+                        self.isBuffering = false
+                        self.loadFailed = true
+                    }
+                }
+                return
             } else if song.source == .kugou {
                 urlString = try? await KugouMusicAPI.shared.songURL(song: song)
                 if urlString == nil {

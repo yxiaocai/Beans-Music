@@ -163,7 +163,7 @@ struct OnboardingView: View {
                 .shadow(color: Color.beansHighlight.opacity(0.45), radius: 24, y: 12)
                 .padding(.bottom, 6)
 
-            Text("欢迎使用 Beans Music")
+            Text("欢迎使用 BMusic")
                 .font(BeansFont.appFont(30, .bold))
                 .foregroundStyle(Color.beansLabel)
 
@@ -299,7 +299,7 @@ struct OnboardingView: View {
                 .foregroundStyle(Color.beansLabel)
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("· Beans Music 只用作个人学习研究，禁止用于商业及非法用途，如产生法律纠纷与本人无关。")
+                Text("· BMusic 只用作个人学习研究，禁止用于商业及非法用途，如产生法律纠纷与本人无关。")
                 Text("· 本软件不提供音频存储服务。曲库中的音频、歌词与封面由你导入的 JSON 所指向的地址提供。")
                 Text("· 请确保你有权使用所导入的音乐资源，并支持正版。")
             }

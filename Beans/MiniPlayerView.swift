@@ -137,7 +137,7 @@ struct MiniPlayerView: View {
         let identity = song.identityKey
         var raw: String?
         if song.source == .catalog {
-            raw = await CatalogLyricLoader.load(from: song.lyricsURL)
+            raw = await CatalogLyricLoader.load(from: song.lyricsURL, identity: song.identityKey)
         } else if song.source == .kugou, let hash = song.kugouHash {
             raw = await KugouMusicAPI.shared.lyric(hash: hash, duration: song.duration)
         } else if song.source == .qq, let mid = song.qqMid {
