@@ -3,6 +3,8 @@ import UIKit
 
 @main
 struct BeansApp: App {
+    @UIApplicationDelegateAdaptor(BeansAppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var auth = AuthStore()
     @StateObject private var player = PlayerManager()
     @StateObject private var theme = ThemeStore.shared
@@ -40,12 +42,27 @@ struct BeansApp: App {
                                 ToastCenter.shared.show(error.localizedDescription)
                             }
                         }
+                        .onAppear { performPendingQuickAction() }
                 } else {
                     // 首次启动只画引导页，不创建主界面四 Tab，避免冷启动卡几秒
                     OnboardingView { disclaimerAccepted = true }
                         .environmentObject(theme)
                 }
             }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active { performPendingQuickAction() }
+            }
+            .onChange(of: disclaimerAccepted) { accepted in
+                if accepted { performPendingQuickAction() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .beansQuickAction)) { _ in
+                performPendingQuickAction()
+            }
         }
+    }
+
+    private func performPendingQuickAction() {
+        guard disclaimerAccepted else { return }
+        QuickActionCenter.shared.performPending(player: player, favorites: favorites)
     }
 }
