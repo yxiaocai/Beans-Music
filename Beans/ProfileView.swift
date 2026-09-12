@@ -1,7 +1,9 @@
 import SwiftUI
+import UniformTypeIdentifiers
+#if os(iOS)
 import UIKit
 import PhotosUI
-import UniformTypeIdentifiers
+#endif
 
 struct ProfileView: View {
     @EnvironmentObject private var theme: ThemeStore
@@ -1923,6 +1925,7 @@ struct SettingsView: View {
 
 // MARK: - 壁纸照片选择器（PHPicker 封装：iOS 14+ 兼容，支持多选图片）
 
+#if os(iOS)
 struct WallpaperPhotoPicker: UIViewControllerRepresentable {
     let onPicked: (Data) -> Void
 
@@ -1985,6 +1988,7 @@ struct FontDocumentPicker: UIViewControllerRepresentable {
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {}
     }
 }
+#endif
 // MARK: - 配置备份文档（SwiftUI 原生 fileExporter 导出，稳定可靠）
 
 struct BackupDocument: FileDocument {
@@ -2003,6 +2007,7 @@ struct BackupDocument: FileDocument {
 }
 // MARK: - 配置备份文件选择器（UIDocumentPicker 封装：比 SwiftUI fileImporter 稳定，所有文件可选）
 
+#if os(iOS)
 struct BackupDocumentPicker: UIViewControllerRepresentable {
     let onPick: (URL) -> Void
 
@@ -2027,3 +2032,4 @@ struct BackupDocumentPicker: UIViewControllerRepresentable {
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {}
     }
 }
+#endif

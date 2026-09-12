@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 
 /// 日志查看器：展示内存日志（可按级别筛选）或导入的日志文件原文

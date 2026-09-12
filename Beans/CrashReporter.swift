@@ -1,5 +1,7 @@
 import Foundation
+#if os(iOS)
 import UIKit
+#endif
 
 /// 闪退检测与崩溃日志：捕获未捕获异常 / 崩溃信号，并在下次启动时检测上次是否异常退出。
 /// 崩溃信息写入 Documents/BeansLogs/crash-日期.log，同时写入 App 内日志，便于反馈排查。

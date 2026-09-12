@@ -1,6 +1,8 @@
 import SwiftUI
-import UIKit
 import CoreImage.CIFilterBuiltins
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - 封面毛玻璃背景（UIKit 独立图层，不参与 SwiftUI 布局）
 //
@@ -16,6 +18,34 @@ import CoreImage.CIFilterBuiltins
 // 而是切歌时在后台队列一次性生成高斯模糊封面图并缓存，前台只做静态显示，
 // 效果更明显且几乎零持续开销。
 
+#if os(macOS)
+struct CoverBlurBackground: View {
+    let url: URL?
+    let scheme: ColorScheme
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .blur(radius: 40)
+                    .overlay(Color.black.opacity(scheme == .dark ? 0.35 : 0.12))
+            }
+        }
+        .clipped()
+        .allowsHitTesting(false)
+        .task(id: url?.absoluteString) {
+            guard let url else {
+                image = nil
+                return
+            }
+            image = try? await CoverImageCache.shared.image(for: url)
+        }
+    }
+}
+#else
 struct CoverBlurBackground: UIViewRepresentable {
     let url: URL?
     let scheme: ColorScheme
@@ -278,3 +308,4 @@ private extension UIColor {
     func lightened(_ amount: CGFloat) -> UIColor { mixed(with: .white, amount: amount) }
     func darkened(_ amount: CGFloat) -> UIColor { mixed(with: .black, amount: amount) }
 }
+#endif

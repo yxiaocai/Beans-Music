@@ -23,6 +23,18 @@ struct OnboardingView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
+                #if os(macOS)
+                Group {
+                    switch page {
+                    case 0: welcomePage
+                    case 1: diyPage
+                    case 2: catalogPage
+                    default: disclaimerPage
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(.easeInOut(duration: 0.3), value: page)
+                #else
                 TabView(selection: $page) {
                     welcomePage.tag(0)
                     diyPage.tag(1)
@@ -31,6 +43,7 @@ struct OnboardingView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut(duration: 0.3), value: page)
+                #endif
 
                 // 底部控制区
                 bottomBar

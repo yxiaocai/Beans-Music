@@ -185,6 +185,7 @@ struct QQCookieImportPanel: View {
 
 // MARK: - WKWebView 封装（打开 QQ 音乐网页版）
 
+#if os(iOS)
 struct QQWebView: UIViewRepresentable {
     let onLoaded: () -> Void
 
@@ -220,3 +221,4 @@ struct QQWebView: UIViewRepresentable {
         }
     }
 }
+#endif

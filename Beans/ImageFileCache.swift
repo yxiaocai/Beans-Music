@@ -1,4 +1,7 @@
+import Foundation
+#if os(iOS)
 import UIKit
+#endif
 
 /// 远程封面磁盘+内存缓存。AsyncImage 只走 URLSession 临时缓存，杀进程就没了。
 final class CoverImageCache {

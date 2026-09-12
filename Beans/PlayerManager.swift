@@ -1,7 +1,9 @@
 import AVFoundation
 import MediaPlayer
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 enum PlayMode: String, CaseIterable, Identifiable {
     case sequential
@@ -580,7 +582,9 @@ final class PlayerManager: NSObject, ObservableObject {
 
     private func setupPlayer(url: URL, thirdPartyVIPNotice: ThirdPartyVIPNotice? = nil) {
         configureAudioSession()
+        #if os(iOS)
         UIApplication.shared.beginReceivingRemoteControlEvents()
+        #endif
         removeCurrentObservers()
         pendingThirdPartyVIPNotice = thirdPartyVIPNotice
         // QQ 官方 CDN（isure.stream.qqmusic.qq.com 等）要求 UA/Referer 请求头，
@@ -753,6 +757,7 @@ final class PlayerManager: NSObject, ObservableObject {
 
     @discardableResult
     static func applyAudioMixPreference(_ mixesWithOthers: Bool) -> Bool {
+        #if os(iOS)
         do {
             let session = AVAudioSession.sharedInstance()
             // 「与其他音频同时播放」开关：开启时 mixWithOthers，打开其他音频软件也能继续播放；关闭则自动暂停
@@ -767,18 +772,25 @@ final class PlayerManager: NSObject, ObservableObject {
             BeansLogger.shared.log("音频会话配置失败：\(error.localizedDescription)", level: .error)
             return false
         }
+        #else
+        _ = mixesWithOthers
+        return true
+        #endif
     }
 
     private func observeRouteChanges() {
+        #if os(iOS)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleRouteChange(_:)),
             name: AVAudioSession.routeChangeNotification,
             object: AVAudioSession.sharedInstance()
         )
+        #endif
     }
 
     /// 输出设备变化（插拔耳机 / 切换扬声器 / 来电路由等）后重新激活会话，避免播放无声
+    #if os(iOS)
     @objc private func handleRouteChange(_ notification: Notification) {
         sessionConfigured = false
         configureAudioSession()
@@ -786,18 +798,22 @@ final class PlayerManager: NSObject, ObservableObject {
             player?.playImmediately(atRate: Float(rate))
         }
     }
+    #endif
 
     // MARK: - 来电/中断处理
 
     private func observeInterruptions() {
+        #if os(iOS)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleInterruption(_:)),
             name: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance()
         )
+        #endif
     }
 
+    #if os(iOS)
     @objc private func handleInterruption(_ notification: Notification) {
         guard let info = notification.userInfo,
               let rawType = info[AVAudioSessionInterruptionTypeKey] as? UInt,
@@ -821,6 +837,7 @@ final class PlayerManager: NSObject, ObservableObject {
             break
         }
     }
+    #endif
 
     // MARK: - 播放历史与统计
 

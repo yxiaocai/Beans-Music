@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 // MARK: - 封面主色提取与动态调色板（Apple Music 风格）
 

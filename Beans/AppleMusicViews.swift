@@ -85,15 +85,14 @@ private struct AppleScreen<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        NavigationView {
+        BeansNavigationStack {
             ZStack {
                 Color(uiColor: .systemBackground).ignoresSafeArea()
                 content
             }
             .navigationTitle(title)
-            .navigationBarItems(trailing: trailing)
+            .toolbar { trailing }
         }
-        .navigationViewStyle(.stack)
     }
 }
 

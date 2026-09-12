@@ -3,6 +3,7 @@ name: Beans
 options:
   deploymentTarget:
     iOS: "15.0"
+    macOS: "26.0"
 
 settings:
   base:
@@ -12,7 +13,10 @@ targets:
   Beans:
     type: application
     platform: iOS
-    sources: [Beans]
+    sources:
+      - path: Beans
+        excludes:
+          - Mac-Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.beans.app
@@ -51,11 +55,60 @@ targets:
             UIApplicationShortcutItemTitle: 播放最近播放的音乐
             UIApplicationShortcutItemIconSymbolName: clock.arrow.circlepath
 
+  BMusic:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Beans
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.beans.app
+        PRODUCT_NAME: BMusic
+        MARKETING_VERSION: "1.6"
+        CURRENT_PROJECT_VERSION: "37"
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Beans/Beans-Bridging-Header.h
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: YES
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_ALLOWED: YES
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+    info:
+      path: Beans/Mac-Info.plist
+      properties:
+        CFBundleDisplayName: BMusic
+        CFBundleName: BMusic
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSMinimumSystemVersion: "26.0"
+        LSApplicationCategoryType: public.app-category.music
+        NSHighResolutionCapable: true
+        NSPrincipalClass: NSApplication
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: JSON Catalog
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.json
+
 schemes:
   Beans:
     build:
       targets:
         Beans: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  BMusic:
+    build:
+      targets:
+        BMusic: all
     run:
       config: Debug
     archive:

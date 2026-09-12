@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 // MARK: - 全屏播放器（全新重写：极简稳定布局）
 // 布局原则：
@@ -2889,7 +2891,7 @@ private struct PlayerSettingsLiquidGlass<S: Shape>: View {
     }
 
     var body: some View {
-        if #available(iOS 26, *), uiStyle == .liquid {
+        if #available(iOS 26, macOS 26, *), uiStyle == .liquid {
             GlassEffectContainer {
                 shape
                     .fill(.clear)
@@ -2919,6 +2921,7 @@ struct ShareFileItem: Identifiable {
 
 // MARK: - 原生系统分享面板（UIActivityViewController 封装，直接调系统自带分享）
 
+#if os(iOS)
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
@@ -2934,6 +2937,7 @@ struct ShareSheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
+#endif
 
 // MARK: - 圆形封面旋转（播放中匀速旋转，暂停即停）
 struct CoverSpin: ViewModifier {

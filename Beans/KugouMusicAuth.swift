@@ -1,5 +1,7 @@
 import Foundation
+#if os(iOS)
 import UIKit
+#endif
 
 final class KugouMusicAuth: ObservableObject {
     static let shared = KugouMusicAuth()

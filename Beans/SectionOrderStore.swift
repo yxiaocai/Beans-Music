@@ -84,7 +84,9 @@ struct SectionOrderSheet: View {
                     }
                 }
             }
+            #if os(iOS)
             .environment(\.editMode, .constant(.active))
+            #endif
             .beansScrollContentBackgroundHidden()
             .background {
                 GlassBackdrop(customColor: theme.backgroundSyncAll ? theme.customBackground : nil)

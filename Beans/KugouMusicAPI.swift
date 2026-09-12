@@ -1,6 +1,8 @@
 import Foundation
 import Security
+#if os(iOS)
 import UIKit
+#endif
 
 final class KugouMusicAPI {
     static let shared = KugouMusicAPI()

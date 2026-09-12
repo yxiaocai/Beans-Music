@@ -1,14 +1,22 @@
 import SwiftUI
-import UIKit
 import CoreImage
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - 动态主题色（跟随系统外观或手动切换）
 
 extension UIColor {
     static func beansDynamic(light: UIColor, dark: UIColor) -> UIColor {
+        #if os(iOS)
         UIColor { traits in
             traits.userInterfaceStyle == .dark ? dark : light
         }
+        #else
+        UIColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        }
+        #endif
     }
 
     static let beansBackground = beansDynamic(

@@ -1,8 +1,11 @@
-import UIKit
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 extension Notification.Name {
     static let beansQuickAction = Notification.Name("beans.quickAction")
+    static let beansMacImportFile = Notification.Name("beans.mac.importFile")
 }
 
 enum QuickActionType: String {
@@ -16,10 +19,12 @@ final class QuickActionCenter {
 
     private init() {}
 
+    #if os(iOS)
     func enqueue(_ item: UIApplicationShortcutItem) {
         pendingType = item.type
         NotificationCenter.default.post(name: .beansQuickAction, object: item.type)
     }
+    #endif
 
     func enqueue(type: String) {
         pendingType = type
@@ -62,6 +67,7 @@ final class QuickActionCenter {
     }
 }
 
+#if os(iOS)
 final class BeansAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
@@ -113,3 +119,4 @@ final class BeansSceneDelegate: UIResponder, UIWindowSceneDelegate {
         completionHandler(true)
     }
 }
+#endif

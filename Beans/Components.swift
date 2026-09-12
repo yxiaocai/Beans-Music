@@ -1,5 +1,8 @@
 import SwiftUI
 import CoreImage.CIFilterBuiltins
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - 工具
 
@@ -10,6 +13,7 @@ func beansTimeString(_ seconds: Double) -> String {
 
 // MARK: - 触感反馈（复用生成器实例，避免每次点击创建新对象造成额外开销/发热）
 
+#if os(iOS)
 enum BeansHaptics {
     private static let lightImpact = UIImpactFeedbackGenerator(style: .light)
     private static let mediumImpact = UIImpactFeedbackGenerator(style: .medium)
@@ -27,6 +31,7 @@ enum BeansHaptics {
     static func success() { notification.notificationOccurred(.success) }
     static func select() { selection.selectionChanged() }
 }
+#endif
 
 // MARK: - 按压动效
 
@@ -78,6 +83,7 @@ struct GlassBackdrop: View {
             } else {
                 LinearGradient.beansBackdrop
             }
+            #if os(iOS)
             Circle()
                 .fill(Color.beansAmber.opacity(0.14))
                 .frame(width: 340, height: 340)
@@ -88,6 +94,7 @@ struct GlassBackdrop: View {
                 .frame(width: 300, height: 300)
                 .blur(radius: 110)
                 .offset(x: -160, y: 340)
+            #endif
         }
         .ignoresSafeArea()
     }
@@ -135,7 +142,7 @@ struct BeansGlass<S: Shape>: View {
 
     var body: some View {
         if isLiquid {
-            if #available(iOS 26, *) {
+            if #available(iOS 26, macOS 26, *) {
                 GlassEffectContainer {
                     shape
                         .fill(.clear)
@@ -189,7 +196,7 @@ struct GlassCard<Content: View>: View {
 
     var body: some View {
         if isLiquid {
-            if #available(iOS 26, *) {
+            if #available(iOS 26, macOS 26, *) {
                 GlassEffectContainer {
                     content()
                         .padding(resolvedPadding)
@@ -227,9 +234,9 @@ struct GlassCard<Content: View>: View {
 struct BeansSymbolReplace: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 17, *) {
+        if #available(iOS 17, macOS 14, *) {
             content.contentTransition(.symbolEffect(.replace))
-        } else if #available(iOS 16, *) {
+        } else if #available(iOS 16, macOS 13, *) {
             content.contentTransition(.opacity)
         } else {
             content
@@ -274,11 +281,15 @@ struct BeansNavigationStack<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
+        #if os(macOS)
+        NavigationStack { content() }
+        #else
         if #available(iOS 16, *) {
             NavigationStack { content() }
         } else {
             NavigationView { content() }.navigationViewStyle(.stack)
         }
+        #endif
     }
 }
 
@@ -295,7 +306,7 @@ struct BeansSheetModifier: ViewModifier {
     let detents: [BeansDetent]
     var dragIndicator: Bool?
 
-    @available(iOS 16, *)
+    @available(iOS 16, macOS 13, *)
     private static func makeDetents(_ detents: [BeansDetent]) -> Set<PresentationDetent> {
         var result: Set<PresentationDetent> = []
         for detent in detents {
@@ -311,7 +322,7 @@ struct BeansSheetModifier: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 16, *) {
+        if #available(iOS 16, macOS 13, *) {
             if let dragIndicator {
                 content
                     .presentationDetents(Self.makeDetents(detents))
@@ -330,19 +341,33 @@ extension View {
     /// iOS 16+ 隐藏滚动条，低版本保持默认
     @ViewBuilder
     func beansScrollIndicatorsHidden() -> some View {
-        if #available(iOS 16, *) { self.scrollIndicators(.hidden) } else { self }
+        if #available(iOS 16, macOS 13, *) { self.scrollIndicators(.hidden) } else { self }
     }
 
     /// iOS 16+ 滚动时收起键盘，低版本保持默认
     @ViewBuilder
     func beansScrollDismissesKeyboard() -> some View {
-        if #available(iOS 16, *) { self.scrollDismissesKeyboard(.interactively) } else { self }
+        if #available(iOS 16, macOS 13, *) { self.scrollDismissesKeyboard(.interactively) } else { self }
     }
 
     /// iOS 16+ 隐藏滚动内容默认背景，低版本保持默认
     @ViewBuilder
     func beansScrollContentBackgroundHidden() -> some View {
-        if #available(iOS 16, *) { self.scrollContentBackground(.hidden) } else { self }
+        if #available(iOS 16, macOS 13, *) { self.scrollContentBackground(.hidden) } else { self }
+    }
+
+    func beansPlayerPresentation<Content: View>(
+        isPresented: Binding<Bool>,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        #if os(macOS)
+        sheet(isPresented: isPresented) {
+            content()
+                .frame(minWidth: 760, minHeight: 640)
+        }
+        #else
+        fullScreenCover(isPresented: isPresented, content: content)
+        #endif
     }
 }
 

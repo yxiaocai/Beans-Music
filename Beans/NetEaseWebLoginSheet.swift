@@ -121,6 +121,7 @@ struct NetEaseWebLoginPanel: View {
 
 // MARK: - WKWebView 封装（打开网易云网页版登录页）
 
+#if os(iOS)
 struct NetEaseWebView: UIViewRepresentable {
     let onLoaded: () -> Void
 
@@ -156,3 +157,4 @@ struct NetEaseWebView: UIViewRepresentable {
         }
     }
 }
+#endif

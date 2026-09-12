@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 enum RootTab: String, CaseIterable, Identifiable {
     case discover
@@ -88,10 +90,32 @@ struct RootView: View {
     }
 
     private var legacyTabResolvedWidth: CGFloat {
+        #if os(iOS)
         min(CGFloat(legacyTabWidth), max(300, UIScreen.main.bounds.width - 28))
+        #else
+        CGFloat(legacyTabWidth)
+        #endif
     }
 
     var body: some View {
+        #if os(macOS)
+        macSplitView
+        #else
+        phoneRoot
+        #endif
+    }
+
+    #if os(macOS)
+    private var macSplitView: some View {
+        MacRootView(selection: $selection)
+            .preferredColorScheme(themeMode.colorScheme)
+            .onAppear { CrashReporter.shared.markLaunchCompleted() }
+    }
+    #endif
+
+    #if os(iOS)
+    @ViewBuilder
+    private var phoneRoot: some View {
         let _ = theme.accent
         let _ = skinStore.skin
         ZStack {
@@ -152,7 +176,7 @@ struct RootView: View {
             }
         }
         .preferredColorScheme(themeMode.colorScheme)
-        .fullScreenCover(isPresented: $showPlayer) {
+        .beansPlayerPresentation(isPresented: $showPlayer) {
             PlayerView(isPresented: $showPlayer)
                 .environmentObject(favorites)
                 .environmentObject(player)
@@ -244,8 +268,10 @@ struct RootView: View {
         .padding(.bottom, 12)
         .offset(x: CGFloat(legacyTabOffsetX), y: CGFloat(legacyTabOffsetY))
     }
+    #endif
 }
 
+#if os(iOS)
 private struct VisualEffectBlur: UIViewRepresentable {
     var style: UIBlurEffect.Style
 
@@ -304,3 +330,4 @@ struct TabBarAppearanceConfigurator: UIViewControllerRepresentable {
         tabBar.isTranslucent = true
     }
 }
+#endif
