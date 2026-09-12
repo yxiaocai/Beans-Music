@@ -266,73 +266,125 @@ final class ThemeStore: ObservableObject {
         backgroundImagePath = UserDefaults.standard.string(forKey: backgroundImageKey) ?? ""
         wallpaperPaths = UserDefaults.standard.stringArray(forKey: wallpaperListKey) ?? []
         uiStyle = BeansUIStyle(rawValue: UserDefaults.standard.string(forKey: uiStyleKey) ?? "") ?? .liquid
-        // 壁纸恢复可能解码 base64，放到首帧之后，避免卡住启动画面
-        DispatchQueue.main.async { [weak self] in
-            self?.restoreWallpapers()
+        reloadBackgroundImage()
+        restoreWallpapers()
+    }
+
+    /// 壁纸自动恢复：覆盖安装后绝对路径会变，但 Documents 里的文件还在。
+    /// 先按文件名对上当前沙盒，只有文件真的丢了才读 UserDefaults 里的 base64。
+    /// 全程在后台，避免更新后第一次启动卡在主线程。
+    private func restoreWallpapers() {
+        let paths = wallpaperPaths
+        let currentBG = backgroundImagePath
+        let deleted = deletedWallpaperPaths()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Self.computeWallpaperRestore(
+                paths: paths,
+                backgroundImagePath: currentBG,
+                deleted: deleted
+            )
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if self.wallpaperPaths != result.paths {
+                    self.wallpaperPaths = result.paths
+                    self.saveWallpaperList()
+                }
+                if self.backgroundImagePath != result.backgroundImagePath {
+                    self.backgroundImagePath = result.backgroundImagePath
+                    UserDefaults.standard.set(result.backgroundImagePath, forKey: self.backgroundImageKey)
+                    self.reloadBackgroundImage()
+                }
+            }
+            UserDefaults.standard.removeObject(forKey: "beans.wallpapers.data")
         }
     }
 
-    /// 壁纸自动恢复：
-    /// 1. 列表中文件仍在→直接保留；文件丢失但有 base64 备份→重建文件。
-    /// 2. 扫描壁纸目录，把残留的 jpg 重新登记。
-    /// 3. 当前背景图丢失时优先从备份重建，失败则回退到壁纸库第一张。
-    /// 注：已彻底移除旧版“重置即删除背景图”的逻辑（它会导致更新后壁纸消失）。
-    private func restoreWallpapers() {
-        let dir = Self.wallpaperDirectory()
-        var backup = UserDefaults.standard.dictionary(forKey: wallpaperDataKey) as? [String: String] ?? [:]
-        let deleted = deletedWallpaperPaths()
-        var restored: [String] = []
-        for path in wallpaperPaths {
-            if deleted.contains(path) { continue }
-            if FileManager.default.fileExists(atPath: path) {
-                restored.append(path)
-                continue
-            }
-            // 覆盖安装后沙盒容器路径会变：备份重建必须写到当前沙盒的有效路径
-            guard let b64 = Self.wallpaperBackupValue(for: path, in: backup),
-                  let data = Data(base64Encoded: b64) else { continue }
-            let fileName = URL(fileURLWithPath: path).lastPathComponent
-            let newPath = Self.wallpaperDirectory().appendingPathComponent(fileName).path
-            if (try? data.write(to: URL(fileURLWithPath: newPath), options: .atomic)) != nil {
-                restored.append(newPath)
-                backup[newPath] = b64
-            }
-        }
+    private struct WallpaperRestoreResult {
+        var paths: [String]
+        var backgroundImagePath: String
+    }
+
+    private static func computeWallpaperRestore(
+        paths: [String],
+        backgroundImagePath: String,
+        deleted: Set<String>
+    ) -> WallpaperRestoreResult {
+        let dir = wallpaperDirectory()
+        var filesByName: [String: String] = [:]
         if let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
-            for name in names where name.hasSuffix(".jpg") {
-                let full = dir.appendingPathComponent(name).path
-                if deleted.contains(full) { continue }
-                if !restored.contains(full) { restored.append(full) }
+            for name in names {
+                let ext = (name as NSString).pathExtension.lowercased()
+                guard ext == "jpg" || ext == "jpeg" else { continue }
+                filesByName[name] = dir.appendingPathComponent(name).path
             }
         }
-        wallpaperPaths = restored
-        saveWallpaperList()
-        if !backgroundImagePath.isEmpty, !deleted.contains(backgroundImagePath) {
-            if !FileManager.default.fileExists(atPath: backgroundImagePath),
-               let b64 = Self.wallpaperBackupValue(for: backgroundImagePath, in: backup),
-               let data = Data(base64Encoded: b64) {
-                let fileName = URL(fileURLWithPath: backgroundImagePath).lastPathComponent
-                let newPath = Self.wallpaperDirectory().appendingPathComponent(fileName).path
+
+        func resolveExisting(_ path: String) -> String? {
+            if deleted.contains(path) { return nil }
+            if FileManager.default.fileExists(atPath: path) { return path }
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            if let existing = filesByName[name], FileManager.default.fileExists(atPath: existing) {
+                return existing
+            }
+            return nil
+        }
+
+        var restored: [String] = []
+        var missing: [String] = []
+        for path in paths {
+            if deleted.contains(path) { continue }
+            if let resolved = resolveExisting(path) {
+                if !restored.contains(resolved) { restored.append(resolved) }
+            } else {
+                missing.append(path)
+            }
+        }
+
+        if !missing.isEmpty {
+            let backup = UserDefaults.standard.dictionary(forKey: "beans.wallpapers.data") as? [String: String] ?? [:]
+            for path in missing {
+                guard let b64 = wallpaperBackupValue(for: path, in: backup),
+                      let data = Data(base64Encoded: b64) else { continue }
+                let fileName = URL(fileURLWithPath: path).lastPathComponent
+                let newPath = dir.appendingPathComponent(fileName).path
                 if (try? data.write(to: URL(fileURLWithPath: newPath), options: .atomic)) != nil {
-                    backgroundImagePath = newPath
-                    UserDefaults.standard.set(newPath, forKey: backgroundImageKey)
-                    backup[newPath] = b64
+                    restored.append(newPath)
+                    filesByName[fileName] = newPath
                 }
             }
-            if !FileManager.default.fileExists(atPath: backgroundImagePath) {
-                backgroundImagePath = wallpaperPaths.first ?? ""
-                UserDefaults.standard.set(backgroundImagePath, forKey: backgroundImageKey)
+        }
+
+        for (_, full) in filesByName {
+            if deleted.contains(full) { continue }
+            if !restored.contains(full) { restored.append(full) }
+        }
+
+        var currentBG = backgroundImagePath
+        if !currentBG.isEmpty, !deleted.contains(currentBG) {
+            if let resolved = resolveExisting(currentBG) {
+                currentBG = resolved
+            } else {
+                let backup = UserDefaults.standard.dictionary(forKey: "beans.wallpapers.data") as? [String: String] ?? [:]
+                if let b64 = wallpaperBackupValue(for: currentBG, in: backup),
+                   let data = Data(base64Encoded: b64) {
+                    let fileName = URL(fileURLWithPath: currentBG).lastPathComponent
+                    let newPath = dir.appendingPathComponent(fileName).path
+                    if (try? data.write(to: URL(fileURLWithPath: newPath), options: .atomic)) != nil {
+                        currentBG = newPath
+                    }
+                }
+            }
+            if !FileManager.default.fileExists(atPath: currentBG) {
+                currentBG = restored.first ?? ""
             }
         }
-        if !backgroundImagePath.isEmpty,
-           FileManager.default.fileExists(atPath: backgroundImagePath),
-           !wallpaperPaths.contains(backgroundImagePath),
-           !deleted.contains(backgroundImagePath) {
-            wallpaperPaths.insert(backgroundImagePath, at: 0)
-            saveWallpaperList()
+        if !currentBG.isEmpty,
+           FileManager.default.fileExists(atPath: currentBG),
+           !restored.contains(currentBG),
+           !deleted.contains(currentBG) {
+            restored.insert(currentBG, at: 0)
         }
-        UserDefaults.standard.set(backup, forKey: wallpaperDataKey)
-        invalidateBackgroundCache()
+        return WallpaperRestoreResult(paths: restored, backgroundImagePath: currentBG)
     }
 
     /// 配置备份恢复后调用：按 UserDefaults 中的壁纸列表与 base64 备份重建壁纸文件
@@ -398,18 +450,27 @@ final class ThemeStore: ObservableObject {
         return Color(hex: backgroundHex)
     }
 
-    /// 上传的背景图片（按路径加载，解码结果缓存，避免大图每次重复解码导致卡顿/布局抖动）
-    private var cachedBackgroundImage: UIImage?
-    var customBackgroundImage: UIImage? {
-        if let cached = cachedBackgroundImage { return cached }
-        guard !backgroundImagePath.isEmpty else { return nil }
-        let image = BeansImageFileCache.image(at: backgroundImagePath)
-        cachedBackgroundImage = image
-        return image
+    /// 上传的背景图片。首帧先用渐变，解码在后台完成后再发布，避免卡住启动。
+    @Published private(set) var customBackgroundImage: UIImage?
+
+    private func reloadBackgroundImage() {
+        let path = backgroundImagePath
+        guard !path.isEmpty else {
+            customBackgroundImage = nil
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let image = BeansImageFileCache.image(at: path)
+            DispatchQueue.main.async {
+                guard let self, self.backgroundImagePath == path else { return }
+                self.customBackgroundImage = image
+            }
+        }
     }
 
     private func invalidateBackgroundCache() {
-        cachedBackgroundImage = nil
+        BeansImageFileCache.remove(backgroundImagePath)
+        reloadBackgroundImage()
     }
 
     /// 上传新壁纸：归一化后保存到壁纸库，并直接设为当前背景（覆盖保存当前壁纸）
@@ -433,8 +494,8 @@ final class ThemeStore: ObservableObject {
             backgroundImagePath = url.path
             UserDefaults.standard.set(url.path, forKey: backgroundImageKey)
             saveWallpaperBackup(url.path, data: imageData)
-            invalidateBackgroundCache()
             BeansImageFileCache.remove(url.path)
+            invalidateBackgroundCache()
         } catch {
             // 保存失败：静默保留当前壁纸
         }
@@ -501,17 +562,27 @@ final class ThemeStore: ObservableObject {
         UserDefaults.standard.set(wallpaperPaths, forKey: wallpaperListKey)
     }
 
-    /// base64 备份（UserDefaults 持久化）：覆盖安装导致文件丢失时可自动重建
+    /// 日常不再把壁纸 base64 写进 UserDefaults（会把启动 plist 撑到数 MB）。
+    /// 文件在 Documents/BeansWallpapers，覆盖安装后按文件名对回当前沙盒即可。
     private func saveWallpaperBackup(_ path: String, data: Data) {
-        var backup = UserDefaults.standard.dictionary(forKey: wallpaperDataKey) as? [String: String] ?? [:]
-        backup[path] = data.base64EncodedString()
-        UserDefaults.standard.set(backup, forKey: wallpaperDataKey)
+        _ = path
+        _ = data
     }
 
     private func removeWallpaperBackup(_ path: String) {
         var backup = UserDefaults.standard.dictionary(forKey: wallpaperDataKey) as? [String: String] ?? [:]
+        guard !backup.isEmpty else { return }
         backup.removeValue(forKey: path)
-        UserDefaults.standard.set(backup, forKey: wallpaperDataKey)
+        if backup.isEmpty {
+            UserDefaults.standard.removeObject(forKey: wallpaperDataKey)
+        } else {
+            UserDefaults.standard.set(backup, forKey: wallpaperDataKey)
+        }
+    }
+
+    /// 导出备份后立刻丢掉 UserDefaults 里的壁纸 blob，避免下次启动再读一遍。
+    func purgeWallpaperUserDefaultsBackup() {
+        UserDefaults.standard.removeObject(forKey: wallpaperDataKey)
     }
 
     /// 删除标记：删除过的壁纸不会被目录扫描/备份重新拉回（保证删除是永久的）

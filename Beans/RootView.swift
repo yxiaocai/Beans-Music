@@ -28,6 +28,29 @@ enum RootTab: String, CaseIterable, Identifiable {
     }
 }
 
+/// 只构建当前选中（以及曾经打开过）的 Tab，避免更新后第一次启动同时实例化四个页面。
+private struct LazyTabContent<Content: View>: View {
+    let isSelected: Bool
+    @ViewBuilder var content: () -> Content
+    @State private var hasAppeared = false
+
+    var body: some View {
+        Group {
+            if hasAppeared || isSelected {
+                content()
+            } else {
+                Color.clear
+            }
+        }
+        .onAppear {
+            if isSelected { hasAppeared = true }
+        }
+        .onChange(of: isSelected) { selected in
+            if selected { hasAppeared = true }
+        }
+    }
+}
+
 struct RootView: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var auth: AuthStore
@@ -81,16 +104,24 @@ struct RootView: View {
                     AppleMusicRootTabs(selection: $appleSelection)
                 } else {
                     TabView(selection: $selection) {
-                        DiscoverView()
+                        LazyTabContent(isSelected: selection == .discover) {
+                            DiscoverView()
+                        }
                             .tabItem { Label(tabLabelsVisible ? "主页" : "", systemImage: "house.fill") }
                             .tag(RootTab.discover)
-                        SearchView()
+                        LazyTabContent(isSelected: selection == .search) {
+                            SearchView()
+                        }
                             .tabItem { Label(tabLabelsVisible ? "搜索" : "", systemImage: "magnifyingglass") }
                             .tag(RootTab.search)
-                        LibraryView()
+                        LazyTabContent(isSelected: selection == .library) {
+                            LibraryView()
+                        }
                             .tabItem { Label(tabLabelsVisible ? "音乐库" : "", systemImage: "music.note.list") }
                             .tag(RootTab.library)
-                        ProfileView()
+                        LazyTabContent(isSelected: selection == .profile) {
+                            ProfileView()
+                        }
                             .tabItem { Label(tabLabelsVisible ? "我的" : "", systemImage: "person.crop.circle") }
                             .tag(RootTab.profile)
                     }

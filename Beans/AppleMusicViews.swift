@@ -32,20 +32,50 @@ struct AppleMusicRootTabs: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            AppleListenNowView()
+            AppleLazyTab(isSelected: selection == .listenNow) {
+                AppleListenNowView()
+            }
                 .tabItem { Label(AppleMusicTab.listenNow.title, systemImage: AppleMusicTab.listenNow.icon) }
                 .tag(AppleMusicTab.listenNow)
-            AppleBrowseView()
+            AppleLazyTab(isSelected: selection == .browse) {
+                AppleBrowseView()
+            }
                 .tabItem { Label(AppleMusicTab.browse.title, systemImage: AppleMusicTab.browse.icon) }
                 .tag(AppleMusicTab.browse)
-            AppleLibraryView()
+            AppleLazyTab(isSelected: selection == .library) {
+                AppleLibraryView()
+            }
                 .tabItem { Label(AppleMusicTab.library.title, systemImage: AppleMusicTab.library.icon) }
                 .tag(AppleMusicTab.library)
-            AppleSearchView()
+            AppleLazyTab(isSelected: selection == .search) {
+                AppleSearchView()
+            }
                 .tabItem { Label(AppleMusicTab.search.title, systemImage: AppleMusicTab.search.icon) }
                 .tag(AppleMusicTab.search)
         }
         .tint(AppSkin.applePink)
+    }
+}
+
+private struct AppleLazyTab<Content: View>: View {
+    let isSelected: Bool
+    @ViewBuilder var content: () -> Content
+    @State private var hasAppeared = false
+
+    var body: some View {
+        Group {
+            if hasAppeared || isSelected {
+                content()
+            } else {
+                Color.clear
+            }
+        }
+        .onAppear {
+            if isSelected { hasAppeared = true }
+        }
+        .onChange(of: isSelected) { selected in
+            if selected { hasAppeared = true }
+        }
     }
 }
 
@@ -84,7 +114,11 @@ struct AppleListenNowView: View {
         )) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    if catalog.isEmpty {
+                    if catalog.isLoading {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 80)
+                    } else if catalog.isEmpty {
                         appleEmptyImport { showImport = true }
                     } else {
                         if !player.history.isEmpty {

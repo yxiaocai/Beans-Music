@@ -109,7 +109,9 @@ final class PlayerManager: NSObject, ObservableObject {
         loadPlayCounts()
         observeInterruptions()
         observeRouteChanges()
-        setupRemoteCommands()
+        DispatchQueue.main.async { [weak self] in
+            self?.setupRemoteCommands()
+        }
     }
 
     // MARK: - 播放控制

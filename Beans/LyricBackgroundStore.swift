@@ -22,7 +22,6 @@ enum LyricBackgroundStore {
             BeansImageFileCache.remove(url.path)
             try imageData.write(to: url, options: .atomic)
             UserDefaults.standard.set(url.path, forKey: pathKey)
-            UserDefaults.standard.set(imageData.base64EncodedString(), forKey: dataKey)
             return url.path
         } catch {
             return nil
@@ -45,15 +44,31 @@ enum LyricBackgroundStore {
         UserDefaults.standard.set(data.base64EncodedString(), forKey: dataKey)
     }
 
+    static func purgeUserDefaultsBackup() {
+        UserDefaults.standard.removeObject(forKey: dataKey)
+    }
+
+    /// 启动时：优先用当前沙盒里的文件，只有文件丢了才解码 base64，然后清掉 UserDefaults 大字段。
+    @discardableResult
+    static func restoreOnLaunch() -> String? {
+        let restored = restoreFromBackup()
+        purgeUserDefaultsBackup()
+        return restored
+    }
+
     @discardableResult
     static func restoreFromBackup() -> String? {
-        guard let b64 = UserDefaults.standard.string(forKey: dataKey),
-              let data = Data(base64Encoded: b64) else { return nil }
         let savedPath = UserDefaults.standard.string(forKey: pathKey) ?? ""
         if !savedPath.isEmpty, FileManager.default.fileExists(atPath: savedPath) {
             return savedPath
         }
         let url = directory.appendingPathComponent("lyric-background.jpg")
+        if FileManager.default.fileExists(atPath: url.path) {
+            UserDefaults.standard.set(url.path, forKey: pathKey)
+            return url.path
+        }
+        guard let b64 = UserDefaults.standard.string(forKey: dataKey),
+              let data = Data(base64Encoded: b64) else { return nil }
         BeansImageFileCache.remove(url.path)
         if (try? data.write(to: url, options: .atomic)) != nil {
             UserDefaults.standard.set(url.path, forKey: pathKey)

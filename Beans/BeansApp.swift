@@ -15,8 +15,13 @@ struct BeansApp: App {
     init() {
         // 闪退检测：优先初始化，检测上次异常退出并安装崩溃捕获
         _ = CrashReporter.shared
-        // 启动时重新注册用户上传的全局字体（覆盖安装后依然生效）
-        FontManager.reinstallIfNeeded()
+        // 尽早开始后台解析曲库，和后面的主题 / 播放器初始化重叠
+        _ = CatalogStore.shared
+        // 字体注册和歌词背景恢复都走后台，避免更新后第一次启动卡在启动画面
+        DispatchQueue.global(qos: .utility).async {
+            FontManager.reinstallIfNeeded()
+            LyricBackgroundStore.restoreOnLaunch()
+        }
         // 新安装默认开启高刷新率；老用户保留自己手动关闭的选择。
         HighRefreshKeeper.registerDefaults()
         HighRefreshKeeper.shared.configureFromDefaults()

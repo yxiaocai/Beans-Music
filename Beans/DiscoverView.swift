@@ -22,7 +22,9 @@ struct DiscoverView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                         header
-                        if catalog.isEmpty {
+                        if catalog.isLoading {
+                            LoadingStateView()
+                        } else if catalog.isEmpty {
                             emptyCard
                         } else {
                             if !player.history.isEmpty {
@@ -68,7 +70,7 @@ struct DiscoverView: View {
                 Text("主页")
                     .font(BeansFont.appFont(30, .bold))
                     .foregroundStyle(Color.beansLabel)
-                Text(catalog.isEmpty ? "导入曲库开始播放" : "\(catalog.albums.count) 张专辑 · \(catalog.songs.count) 首")
+                Text(catalog.isLoading ? "正在加载曲库…" : catalog.isEmpty ? "导入曲库开始播放" : "\(catalog.albums.count) 张专辑 · \(catalog.songs.count) 首")
                     .font(BeansFont.appFont(13))
                     .foregroundStyle(Color.beansComment)
             }

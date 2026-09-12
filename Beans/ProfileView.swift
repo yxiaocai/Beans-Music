@@ -17,7 +17,6 @@ struct ProfileView: View {
     @State private var showSettings = false
     /// 软件使用说明
     @State private var showUsageGuide = false
-    @State private var didRefreshProfileAccount = false
     @ObservedObject private var qqAuth = QQMusicAuth.shared
     @ObservedObject private var kugouAuth = KugouMusicAuth.shared
     @ObservedObject private var platformPrefs = PlatformPreferenceStore.shared
@@ -93,14 +92,6 @@ struct ProfileView: View {
                 .padding(.bottom, 190)
             }
             .beansScrollIndicatorsHidden()
-        }
-        .task {
-            guard !didRefreshProfileAccount else { return }
-            didRefreshProfileAccount = true
-            await auth.refreshAccount()
-            if qqAuth.isLoggedIn {
-                await qqAuth.fetchVIPStatus()
-            }
         }
         .sheet(isPresented: $showHistory) {
             HistoryView()
@@ -1587,6 +1578,10 @@ struct SettingsView: View {
         if includeWallpapers {
             theme.refreshWallpaperBackupForExport()
             LyricBackgroundStore.refreshForExport()
+        }
+        defer {
+            theme.purgeWallpaperUserDefaultsBackup()
+            LyricBackgroundStore.purgeUserDefaultsBackup()
         }
         for (key, value) in defaults.dictionaryRepresentation() {
             guard Self.isBackupCandidateKey(key) else { continue }

@@ -266,8 +266,10 @@ final class CatalogStore: ObservableObject {
     @Published private(set) var albums: [CatalogAlbum] = []
     @Published private(set) var songs: [Song] = []
     @Published private(set) var isBusy = false
+    /// 启动时后台解析曲库，避免卡住首帧
+    @Published private(set) var isLoading = false
 
-    var isEmpty: Bool { songs.isEmpty }
+    var isEmpty: Bool { !isLoading && songs.isEmpty }
 
     private let fileManager = FileManager.default
     private let indexName = "index.json"
@@ -285,7 +287,20 @@ final class CatalogStore: ObservableObject {
     private var indexURL: URL { rootDirectory.appendingPathComponent(indexName) }
 
     private init() {
-        loadFromDisk()
+        let loaded = Self.readSources(from: indexURL)
+        sources = loaded
+        guard !loaded.isEmpty else { return }
+        isLoading = true
+        let root = rootDirectory
+        Task.detached(priority: .userInitiated) {
+            let parsed = Self.parseAll(sources: loaded, root: root)
+            await MainActor.run {
+                let store = CatalogStore.shared
+                store.albums = parsed.albums
+                store.songs = parsed.songs
+                store.isLoading = false
+            }
+        }
     }
 
     func song(identityKey: String) -> Song? {
@@ -436,23 +451,27 @@ final class CatalogStore: ObservableObject {
         }
     }
 
-    private func loadFromDisk() {
-        guard let data = try? Data(contentsOf: indexURL),
-              let list = try? JSONDecoder().decode([CatalogSource].self, from: data) else {
-            sources = []
-            albums = []
-            songs = []
-            return
-        }
-        sources = list
-        rebuildIndex()
+    private func rebuildIndex() {
+        let parsed = Self.parseAll(sources: sources, root: rootDirectory)
+        albums = parsed.albums
+        songs = parsed.songs
     }
 
-    private func rebuildIndex() {
+    nonisolated private static func readSources(from url: URL) -> [CatalogSource] {
+        guard let data = try? Data(contentsOf: url),
+              let list = try? JSONDecoder().decode([CatalogSource].self, from: data) else {
+            return []
+        }
+        return list
+    }
+
+    nonisolated private static func parseAll(sources: [CatalogSource], root: URL) -> (albums: [CatalogAlbum], songs: [Song]) {
         var nextAlbums: [CatalogAlbum] = []
         var nextSongs: [Song] = []
         for source in sources {
-            let fileURL = catalogFileURL(source.id)
+            let fileURL = root
+                .appendingPathComponent(source.id.uuidString, isDirectory: true)
+                .appendingPathComponent("catalog.json")
             guard let data = try? Data(contentsOf: fileURL),
                   let parsed = try? CatalogParser.parse(
                     data: data,
@@ -465,8 +484,7 @@ final class CatalogStore: ObservableObject {
             nextAlbums.append(contentsOf: parsed.albums)
             nextSongs.append(contentsOf: parsed.songs)
         }
-        albums = nextAlbums
-        songs = nextSongs
+        return (nextAlbums, nextSongs)
     }
 
     private func replace(source: CatalogSource) {
