@@ -43,6 +43,15 @@ enum ChangelogStore {
 
     static let logs: [VersionLog] = [
         VersionLog(
+            id: "1.6.1",
+            version: "1.6.1",
+            title: "曲库文件可以选择",
+            features: [],
+            fixes: [
+                "修复签名安装后导入本地 JSON 时，文件列表里点选没有反应的问题"
+            ]
+        ),
+        VersionLog(
             id: "1.6",
             version: "1.6",
             title: "曲库导入与 BMusic",

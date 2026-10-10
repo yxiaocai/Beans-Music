@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(iOS)
+import UIKit
+#endif
 
 struct CatalogAlbumCard: View {
     let album: CatalogAlbum
@@ -107,7 +110,6 @@ struct CatalogImportSheet: View {
     @State private var displayName = ""
     @State private var defaultArtist = ""
     @State private var urlText = ""
-    @State private var showFileImporter = false
     @State private var errorMessage: String?
     @State private var importing = false
 
@@ -145,7 +147,7 @@ struct CatalogImportSheet: View {
                 } else {
                     Section {
                         Button {
-                            showFileImporter = true
+                            pickLocalFile()
                         } label: {
                             Label("选择 JSON 文件", systemImage: "doc.badge.plus")
                         }
@@ -184,20 +186,27 @@ struct CatalogImportSheet: View {
                 }
             }
         }
-        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                Task { await importFile(url) }
-            case .failure(let error):
-                errorMessage = error.localizedDescription
-            }
+    }
+
+    /// 真机上的 SwiftUI fileImporter 套在这个 sheet 里时，点文件经常没有回调。
+    /// 安装后的 IPA 还会把本 App 登记为 public.json 的打开方式，系统会把「打开」吞掉，看起来像点了没选中。
+    /// 这里直接弹出 UIDocumentPicker，并用 asCopy 把文件拷进临时目录再读。
+    private func pickLocalFile() {
+        #if os(iOS)
+        CatalogFileImporter.present { url in
+            importPickedFile(url)
+        } onFailure: { error in
+            errorMessage = error.localizedDescription
         }
+        #else
+        guard let url = MacOpenPanel.pickFiles(contentTypes: [.json, .plainText, .item], multiple: false).first else { return }
+        importPickedFile(url)
+        #endif
     }
 
     private func runImport() async {
         if mode == .file {
-            showFileImporter = true
+            pickLocalFile()
             return
         }
         importing = true
@@ -212,7 +221,7 @@ struct CatalogImportSheet: View {
         }
     }
 
-    private func importFile(_ url: URL) async {
+    private func importPickedFile(_ url: URL) {
         importing = true
         errorMessage = nil
         defer { importing = false }
@@ -225,6 +234,78 @@ struct CatalogImportSheet: View {
         }
     }
 }
+
+#if os(iOS)
+/// 从当前最上层界面直接 present 文档选择器。
+/// 允许 json / 纯文本 / 任意文件：微信、Safari 落下的 .json 经常不是 public.json，只放行 .json 时行是灰的，点击没有反应。
+private enum CatalogFileImporter {
+    static func present(onPick: @escaping (URL) -> Void, onFailure: @escaping (Error) -> Void) {
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: [.json, .plainText, .text, .data, .item],
+            asCopy: true
+        )
+        let delegate = Delegate(onPick: onPick, onFailure: onFailure)
+        picker.delegate = delegate
+        objc_setAssociatedObject(picker, &AssociatedKeys.delegate, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        picker.allowsMultipleSelection = false
+        picker.shouldShowFileExtensions = true
+        guard let host = topViewController() else {
+            onFailure(NSError(
+                domain: "CatalogFileImporter",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "无法打开文件选择器"]
+            ))
+            return
+        }
+        host.present(picker, animated: true)
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? scenes.flatMap(\.windows).first
+        var top = window?.rootViewController
+        while let next = top?.presentedViewController, !next.isBeingDismissed {
+            top = next
+        }
+        return top
+    }
+
+    private enum AssociatedKeys {
+        static var delegate: UInt8 = 0
+    }
+
+    private final class Delegate: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+        let onFailure: (Error) -> Void
+
+        init(onPick: @escaping (URL) -> Void, onFailure: @escaping (Error) -> Void) {
+            self.onPick = onPick
+            self.onFailure = onFailure
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard let url = urls.first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                let folder = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("catalog-import", isDirectory: true)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let name = url.lastPathComponent.isEmpty ? "catalog.json" : url.lastPathComponent
+                let dest = folder.appendingPathComponent(name)
+                try? FileManager.default.removeItem(at: dest)
+                try data.write(to: dest, options: .atomic)
+                let callback = onPick
+                controller.dismiss(animated: true) { callback(dest) }
+            } catch {
+                let callback = onFailure
+                controller.dismiss(animated: true) { callback(error) }
+            }
+        }
+    }
+}
+#endif
 
 struct CatalogSourcesSection: View {
     @ObservedObject private var catalog = CatalogStore.shared
