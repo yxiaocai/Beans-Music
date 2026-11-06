@@ -59,6 +59,9 @@ struct BeansApp: App {
                 }
             }
             .onChange(of: scenePhase) { phase in
+                if phase != .active {
+                    player.savePlaybackCheckpoint()
+                }
                 if phase == .active { performPendingQuickAction() }
             }
             .onChange(of: disclaimerAccepted) { accepted in

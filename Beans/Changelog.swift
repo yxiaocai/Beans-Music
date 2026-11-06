@@ -43,6 +43,43 @@ enum ChangelogStore {
 
     static let logs: [VersionLog] = [
         VersionLog(
+            id: "1.8",
+            version: "1.8",
+            title: "接着上次的进度播放",
+            features: [
+                "记住上次播放到的歌曲和秒数。下次打开停在这一首，点播放从上次的位置继续"
+            ],
+            fixes: []
+        ),
+        VersionLog(
+            id: "1.7.2",
+            version: "1.7.2",
+            title: "切歌不再闪退",
+            features: [],
+            fixes: [
+                "修复切到已预加载的下一首时闪退的问题"
+            ]
+        ),
+        VersionLog(
+            id: "1.7.1",
+            version: "1.7.1",
+            title: "播放不再闪退",
+            features: [],
+            fixes: [
+                "修复播放音乐时预加载下一首直接闪退的问题"
+            ]
+        ),
+        VersionLog(
+            id: "1.7",
+            version: "1.7",
+            title: "下一首预加载",
+            features: [
+                "当前歌曲出声后自动预加载下一首：提前解析播放地址，并缓冲开头约 12 秒",
+                "单曲循环，或队列里没有另一首时，不会预加载"
+            ],
+            fixes: []
+        ),
+        VersionLog(
             id: "1.6.1",
             version: "1.6.1",
             title: "曲库文件可以选择",

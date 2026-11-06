@@ -88,10 +88,24 @@ final class PlayerManager: NSObject, ObservableObject {
     private var wasPlayingBeforeInterruption = false
     private var lastPublishedProgress: Double = -1
     private var lastNowPlayingArtworkKey: String?
+    /// 下一首预加载：当前歌曲已经出声后再解析地址并缓冲开头，避免和当前这首抢首包。
+    private var preparedPlayback: PreparedPlayback?
+    private var prerollPlayer: AVPlayer?
+    private var prerollStatusObserver: NSKeyValueObservation?
+    private var didStartPreroll = false
+    private var preloadTask: Task<Void, Never>?
+    private var preloadGeneration = 0
+    private var inflightPreloadIdentity: String?
+    private var inflightPreloadQuality: BeansAudioQuality?
+    private let nextPreloadBufferSeconds: Double = 12
     private static let nowPlayingArtworkCache = NSCache<NSURL, UIImage>()
 
     private let historyKey = "beans.history"
     private let countsKey = "beans.playcounts"
+    private let checkpointKey = "beans.playback.checkpoint"
+    private var lastCheckpointProgress = -1.0
+    /// 恢复进度的 seek 完成前，进度回调先不要把界面拉回 0 秒。
+    private var holdingResume = false
     private let audioMixKey = "beans.audio.mixothers.v1"
     private let thirdPartyVIPNoticeKey = "beans.showThirdPartyVIPNotice"
     private let defaults = UserDefaults.standard
@@ -99,6 +113,23 @@ final class PlayerManager: NSObject, ObservableObject {
     private struct ThirdPartyVIPNotice {
         let songKey: String
         let message: String
+    }
+
+    private struct PlaybackAsset {
+        let url: URL
+        let notice: ThirdPartyVIPNotice?
+        let catalogRemote: URL?
+    }
+
+    private struct PreparedPlayback {
+        let identity: String
+        let quality: BeansAudioQuality
+        let url: URL
+        let item: AVPlayerItem
+        let notice: ThirdPartyVIPNotice?
+        let catalogRemote: URL?
+        /// 切歌时接手这个播放器。为空则按 url 新建，避免把 item 挂到第二个 AVPlayer 上。
+        var player: AVPlayer? = nil
     }
 
     var currentSong: Song? {
@@ -109,6 +140,7 @@ final class PlayerManager: NSObject, ObservableObject {
         super.init()
         loadHistory()
         loadPlayCounts()
+        restorePlaybackCheckpoint()
         observeInterruptions()
         observeRouteChanges()
         DispatchQueue.main.async { [weak self] in
@@ -142,7 +174,11 @@ final class PlayerManager: NSObject, ObservableObject {
     }
 
     func togglePlayPause() {
-        guard let player else { return }
+        guard let player else {
+            guard currentSong != nil else { return }
+            loadCurrent(resumeAt: progress > 1 ? progress : nil)
+            return
+        }
         if player.timeControlStatus == .playing {
             player.pause()
             isPlaying = false
@@ -151,6 +187,7 @@ final class PlayerManager: NSObject, ObservableObject {
             isPlaying = true
         }
         updateNowPlaying()
+        savePlaybackCheckpoint()
     }
 
     func next(manual: Bool = true) {
@@ -189,8 +226,10 @@ final class PlayerManager: NSObject, ObservableObject {
             if abs(actual - self.progress) > 0.25 {
                 self.progress = actual
             }
+            self.savePlaybackCheckpoint()
         }
         updateNowPlaying()
+        savePlaybackCheckpoint()
     }
 
     func seekBy(_ delta: Double) {
@@ -204,6 +243,7 @@ final class PlayerManager: NSObject, ObservableObject {
         case .shuffle: playMode = .sequential
         }
         buildPlayOrder()
+        preloadUpcoming()
     }
 
     func setRate(_ newRate: Double) {
@@ -223,13 +263,17 @@ final class PlayerManager: NSObject, ObservableObject {
         guard queue.indices.contains(index), queue.count > 1 else { return }
         let removedID = queue[index].id
         queue.remove(at: index)
+        let removedCurrent = index == currentIndex
         if index < currentIndex {
             currentIndex -= 1
-        } else if index == currentIndex {
+        } else if removedCurrent {
             currentIndex = min(currentIndex, queue.count - 1)
             loadCurrent()
         }
         buildPlayOrder(avoiding: removedID)
+        if !removedCurrent {
+            preloadUpcoming()
+        }
     }
 
     func retryCurrent() {
@@ -265,6 +309,7 @@ final class PlayerManager: NSObject, ObservableObject {
             currentIndex = 0
         }
         buildPlayOrder()
+        preloadUpcoming()
     }
 
     // MARK: - 睡眠定时
@@ -353,86 +398,318 @@ final class PlayerManager: NSObject, ObservableObject {
         updateNowPlaying()
     }
 
-    private func loadCurrent() {
+    private func loadCurrent(resumeAt: Double? = nil) {
         guard let song = currentSong else { return }
         loadGeneration += 1
         let generation = loadGeneration
         // 切歌立即暂停旧音频，避免新歌加载期间旧歌继续播放造成“切歌卡住”感
         player?.pause()
-        duration = song.duration
-        progress = 0
+        let resume = (resumeAt ?? 0) > 1 ? resumeAt : nil
+        duration = max(song.duration, resume ?? 0)
+        progress = resume ?? 0
         isPlaying = false
         isBuffering = true
         loadFailed = false
         pushHistory(song)
-        Task {
-            var urlString: String?
-            var resolvedThirdParty: UnblockService.Resolved?
-            // 版权受限歌手（周杰伦）：允许第三方音源，但启用严格模式（歌名+歌手+时长三重匹配原唱，校验不过拒绝，绝不播放翻唱）
-            // 免费听歌（灰色歌曲解锁）总开关：默认开启，优先使用内置预设音源兜底。
-            let enableUnblock = defaults.object(forKey: "beans.enableUnblock") as? Bool ?? true
-            let strictUnlock = shouldLockOfficialOnly(song)
-            let quality = BeansAudioQuality.current
-            BeansLogger.shared.log("▶ 开始播放：\(song.name) - \(song.artists)｜平台=\(song.source.rawValue) id=\(song.id) 音质=\(quality.level) 免费听歌=\(enableUnblock ? "开" : "关") 官方受限=\(strictUnlock ? "是" : "否")", level: .info)
-            if song.source == .catalog {
-                let remote = song.catalogPlaybackURL(quality: quality)
-                let local = MediaCacheStore.shared.audioFileURL(identity: song.identityKey, quality: quality)
+        let quality = BeansAudioQuality.current
+        if let prepared = takePrepared(for: song, quality: quality) {
+            logPlaybackStart(song, quality: quality, preloaded: true)
+            startPrepared(prepared, song: song, quality: quality, resumeAt: resume)
+            return
+        }
+        if inflightPreloadIdentity == song.identityKey, inflightPreloadQuality == quality, let task = preloadTask {
+            Task { [weak self] in
+                _ = await task.value
                 await MainActor.run {
-                    guard generation == self.loadGeneration else { return }
-                    if let local {
-                        self.setupPlayer(url: local)
-                    } else if let remote {
-                        self.setupPlayer(url: remote)
-                        MediaCacheStore.shared.prefetchAudio(from: remote, identity: song.identityKey, quality: quality)
+                    guard let self, generation == self.loadGeneration else { return }
+                    if let prepared = self.takePrepared(for: song, quality: quality) {
+                        self.logPlaybackStart(song, quality: quality, preloaded: true)
+                        self.startPrepared(prepared, song: song, quality: quality, resumeAt: resume)
                     } else {
-                        self.isBuffering = false
-                        self.loadFailed = true
+                        self.resolveAndPlay(song: song, quality: quality, generation: generation, resumeAt: resume)
                     }
                 }
-                return
-            } else if song.source == .kugou {
-                urlString = try? await KugouMusicAPI.shared.songURL(song: song)
-                if urlString == nil {
-                    resolvedThirdParty = await kugouFallback(song: song, enableUnblock: enableUnblock)
-                }
-            } else if song.source == .qq, let mid = song.qqMid {
-                // 是否有播放权益以 vkey 实际返回为准；会员接口识别失败时也必须尝试官方地址。
-                urlString = try? await QQMusicAPI.shared.songURL(songmid: mid, mediaMid: song.qqMediaMid)
-                if urlString == nil {
-                    (urlString, resolvedThirdParty) = await qqFallback(song: song, quality: quality, enableUnblock: enableUnblock, strict: strictUnlock)
-                }
-            } else {
-                (urlString, resolvedThirdParty) = await neteaseResolve(song: song, quality: quality, enableUnblock: enableUnblock, strict: strictUnlock)
             }
-            if let resolved = resolvedThirdParty {
-                let notice = self.thirdPartyVIPNotice(for: song, sourceTitle: resolved.sourceTitle)
-                await MainActor.run {
-                    guard generation == self.loadGeneration else { return }
-                    self.setupPlayer(url: resolved.url, thirdPartyVIPNotice: notice)
-                }
-                return
-            }
-            guard let urlString, let url = URL(string: urlString) else {
-                let thirdPartyAttempted = resolvedThirdParty != nil
-                await MainActor.run {
-                    guard generation == self.loadGeneration else { return }
-                    self.isBuffering = false
-                    self.loadFailed = true
-                    if song.source != .kugou, self.shouldLockOfficialOnly(song) {
-                        BeansLogger.shared.log("播放失败：\(song.name) - 未找到原唱音源（官方受限），拒绝翻唱版本", level: .error)
-                        ToastCenter.shared.show("《\(song.name)》未找到原唱音源（官方受限），已停止播放，拒绝翻唱版本")
-                    } else {
-                        let hint = thirdPartyAttempted ? "（第三方音源尝试后无结果）" : "（第三方音源未命中）"
-                        BeansLogger.shared.log("播放失败：\(song.name) - 无法解析播放地址\(hint)｜音质=\(quality.level) 免费听歌=\(enableUnblock ? "开" : "关")", level: .error)
-                    }
-                }
-                return
-            }
+            return
+        }
+        resolveAndPlay(song: song, quality: quality, generation: generation, resumeAt: resume)
+    }
+
+    private func resolveAndPlay(song: Song, quality: BeansAudioQuality, generation: Int, resumeAt: Double? = nil) {
+        logPlaybackStart(song, quality: quality, preloaded: false)
+        Task { [weak self] in
+            guard let self else { return }
+            let asset = await self.resolvePlaybackAsset(song: song, quality: quality)
             await MainActor.run {
                 guard generation == self.loadGeneration else { return }
-                self.setupPlayer(url: url)
+                guard let asset else {
+                    self.failPlayback(song: song, quality: quality)
+                    return
+                }
+                self.setupPlayer(url: asset.url, thirdPartyVIPNotice: asset.notice, resumeAt: resumeAt)
+                if let remote = asset.catalogRemote {
+                    MediaCacheStore.shared.prefetchAudio(from: remote, identity: song.identityKey, quality: quality)
+                }
             }
         }
+    }
+
+    private func startPrepared(_ prepared: PreparedPlayback, song: Song, quality: BeansAudioQuality, resumeAt: Double? = nil) {
+        if let adopted = prepared.player {
+            adopted.cancelPendingPrerolls()
+            adopted.pause()
+            adopted.isMuted = false
+            adopted.volume = 1
+            prepared.item.preferredForwardBufferDuration = 0
+            setupPlayer(player: adopted, url: prepared.url, thirdPartyVIPNotice: prepared.notice, resumeAt: resumeAt)
+        } else {
+            setupPlayer(url: prepared.url, thirdPartyVIPNotice: prepared.notice, resumeAt: resumeAt)
+        }
+        if let remote = prepared.catalogRemote {
+            MediaCacheStore.shared.prefetchAudio(from: remote, identity: song.identityKey, quality: quality)
+        }
+    }
+
+    private func logPlaybackStart(_ song: Song, quality: BeansAudioQuality, preloaded: Bool) {
+        let enableUnblock = defaults.object(forKey: "beans.enableUnblock") as? Bool ?? true
+        let strictUnlock = shouldLockOfficialOnly(song)
+        BeansLogger.shared.log("▶ 开始播放：\(song.name) - \(song.artists)｜平台=\(song.source.rawValue) id=\(song.id) 音质=\(quality.level) 免费听歌=\(enableUnblock ? "开" : "关") 官方受限=\(strictUnlock ? "是" : "否") 预加载=\(preloaded ? "命中" : "无")", level: .info)
+    }
+
+    private func failPlayback(song: Song, quality: BeansAudioQuality) {
+        isBuffering = false
+        loadFailed = true
+        let enableUnblock = defaults.object(forKey: "beans.enableUnblock") as? Bool ?? true
+        if song.source != .kugou, shouldLockOfficialOnly(song) {
+            BeansLogger.shared.log("播放失败：\(song.name) - 未找到原唱音源（官方受限），拒绝翻唱版本", level: .error)
+            let message = "《\(song.name)》未找到原唱音源（官方受限），已停止播放，拒绝翻唱版本"
+            Task { @MainActor in
+                ToastCenter.shared.show(message)
+            }
+        } else if song.source != .catalog {
+            BeansLogger.shared.log("播放失败：\(song.name) - 无法解析播放地址（第三方音源未命中）｜音质=\(quality.level) 免费听歌=\(enableUnblock ? "开" : "关")", level: .error)
+        }
+    }
+
+    /// 当前这首已经出声后，提前准备「下一首」：解析地址，并用静音播放器缓冲大约 12 秒。
+    /// 单曲循环、队列里没有别的歌、或下一首就是当前这首时不预加载。
+    private func preloadUpcoming() {
+        guard let song = upcomingSong() else {
+            preloadGeneration += 1
+            preloadTask?.cancel()
+            inflightPreloadIdentity = nil
+            inflightPreloadQuality = nil
+            discardPreparedPlayback()
+            return
+        }
+        let quality = BeansAudioQuality.current
+        if let prepared = preparedPlayback, prepared.identity == song.identityKey, prepared.quality == quality {
+            return
+        }
+        if inflightPreloadIdentity == song.identityKey, inflightPreloadQuality == quality {
+            return
+        }
+        preloadGeneration += 1
+        let generation = preloadGeneration
+        preloadTask?.cancel()
+        discardPreparedPlayback()
+        inflightPreloadIdentity = song.identityKey
+        inflightPreloadQuality = quality
+        let identity = song.identityKey
+        preloadTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor in
+                    guard generation == self.preloadGeneration else { return }
+                    self.inflightPreloadIdentity = nil
+                    self.inflightPreloadQuality = nil
+                }
+            }
+            guard let asset = await self.resolvePlaybackAsset(song: song, quality: quality) else {
+                BeansLogger.shared.log("预加载下一首失败：\(song.name)", level: .debug)
+                return
+            }
+            if Task.isCancelled { return }
+            await MainActor.run {
+                guard generation == self.preloadGeneration else { return }
+                let stillNeeded = self.currentSong?.identityKey == identity || self.upcomingSong()?.identityKey == identity
+                guard stillNeeded else { return }
+                let item = self.makePlayerItem(url: asset.url)
+                item.preferredForwardBufferDuration = self.nextPreloadBufferSeconds
+                let preroll = AVPlayer()
+                preroll.isMuted = true
+                preroll.volume = 0
+                self.didStartPreroll = false
+                self.prerollPlayer = preroll
+                // preroll(atRate:) 在 status 还不是 readyToPlay 时会抛 NSInvalidArgumentException，直接闪退。
+                // 也不要在 status 的 KVO 回调里同步调用，等回到主队列再缓冲。
+                self.prerollStatusObserver = preroll.observe(\.status, options: [.new]) { [weak self] player, _ in
+                    guard player.status == .readyToPlay else { return }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, !self.didStartPreroll, self.prerollPlayer === player else { return }
+                        guard player.status == .readyToPlay, player.rate == 0 else { return }
+                        self.didStartPreroll = true
+                        player.preroll(atRate: 1) { _ in }
+                    }
+                }
+                preroll.replaceCurrentItem(with: item)
+                self.preparedPlayback = PreparedPlayback(
+                    identity: identity,
+                    quality: quality,
+                    url: asset.url,
+                    item: item,
+                    notice: asset.notice,
+                    catalogRemote: asset.catalogRemote
+                )
+                BeansLogger.shared.log("预加载下一首：\(song.name)", level: .info)
+            }
+        }
+    }
+
+    /// 按当前播放模式算出自动切歌会去的那一首，不修改队列。
+    private func upcomingSong() -> Song? {
+        guard queue.count > 1, playMode != .repeatOne else { return nil }
+        let index: Int
+        switch playMode {
+        case .shuffle:
+            guard !playOrder.isEmpty else { return nil }
+            index = playOrder[(orderPosition + 1) % playOrder.count]
+        default:
+            index = (currentIndex + 1) % queue.count
+        }
+        guard queue.indices.contains(index) else { return nil }
+        let song = queue[index]
+        if song.identityKey == currentSong?.identityKey { return nil }
+        return song
+    }
+
+    private func takePrepared(for song: Song, quality: BeansAudioQuality) -> PreparedPlayback? {
+        guard let prepared = preparedPlayback,
+              prepared.identity == song.identityKey,
+              prepared.quality == quality else { return nil }
+        if prepared.item.status == .failed || prerollPlayer?.currentItem !== prepared.item {
+            discardPreparedPlayback()
+            return nil
+        }
+        // 播放项只能属于一个 AVPlayer。切歌时直接接手静音播放器，不能摘下来再 new 一个。
+        prerollStatusObserver?.invalidate()
+        prerollStatusObserver = nil
+        didStartPreroll = false
+        let adopted = prerollPlayer
+        prerollPlayer = nil
+        preparedPlayback = nil
+        return PreparedPlayback(
+            identity: prepared.identity,
+            quality: prepared.quality,
+            url: prepared.url,
+            item: prepared.item,
+            notice: prepared.notice,
+            catalogRemote: prepared.catalogRemote,
+            player: adopted
+        )
+    }
+
+    private func discardPreparedPlayback() {
+        releasePrerollPlayer()
+        preparedPlayback = nil
+    }
+
+    /// 先取消未完成的 preroll，再摘掉 item，避免同一条 AVPlayerItem 同时挂在两个 AVPlayer 上。
+    private func releasePrerollPlayer() {
+        prerollStatusObserver?.invalidate()
+        prerollStatusObserver = nil
+        didStartPreroll = false
+        prerollPlayer?.cancelPendingPrerolls()
+        prerollPlayer?.replaceCurrentItem(with: nil)
+        prerollPlayer = nil
+    }
+
+    private func resolvePlaybackAsset(song: Song, quality: BeansAudioQuality) async -> PlaybackAsset? {
+        let enableUnblock = defaults.object(forKey: "beans.enableUnblock") as? Bool ?? true
+        let strictUnlock = shouldLockOfficialOnly(song)
+        if song.source == .catalog {
+            let remote = song.catalogPlaybackURL(quality: quality)
+            if let local = MediaCacheStore.shared.audioFileURL(identity: song.identityKey, quality: quality) {
+                return PlaybackAsset(url: local, notice: nil, catalogRemote: nil)
+            }
+            if let remote {
+                return PlaybackAsset(url: remote, notice: nil, catalogRemote: remote)
+            }
+            return nil
+        }
+        if song.source == .kugou {
+            if let urlString = try? await KugouMusicAPI.shared.songURL(song: song) {
+                guard let url = URL(string: urlString) else { return nil }
+                return PlaybackAsset(url: url, notice: nil, catalogRemote: nil)
+            }
+            if let resolved = await kugouFallback(song: song, enableUnblock: enableUnblock) {
+                return PlaybackAsset(
+                    url: resolved.url,
+                    notice: thirdPartyVIPNotice(for: song, sourceTitle: resolved.sourceTitle),
+                    catalogRemote: nil
+                )
+            }
+            return nil
+        }
+        if song.source == .qq, let mid = song.qqMid {
+            if let urlString = try? await QQMusicAPI.shared.songURL(songmid: mid, mediaMid: song.qqMediaMid),
+               let url = URL(string: urlString) {
+                return PlaybackAsset(url: url, notice: nil, catalogRemote: nil)
+            }
+            let (urlString, resolved) = await qqFallback(song: song, quality: quality, enableUnblock: enableUnblock, strict: strictUnlock)
+            if let resolved {
+                return PlaybackAsset(
+                    url: resolved.url,
+                    notice: thirdPartyVIPNotice(for: song, sourceTitle: resolved.sourceTitle),
+                    catalogRemote: nil
+                )
+            }
+            if let urlString, let url = URL(string: urlString) {
+                return PlaybackAsset(url: url, notice: nil, catalogRemote: nil)
+            }
+            return nil
+        }
+        let (urlString, resolved) = await neteaseResolve(song: song, quality: quality, enableUnblock: enableUnblock, strict: strictUnlock)
+        if let resolved {
+            return PlaybackAsset(
+                url: resolved.url,
+                notice: thirdPartyVIPNotice(for: song, sourceTitle: resolved.sourceTitle),
+                catalogRemote: nil
+            )
+        }
+        if let urlString, let url = URL(string: urlString) {
+            return PlaybackAsset(url: url, notice: nil, catalogRemote: nil)
+        }
+        return nil
+    }
+
+    // QQ 官方 CDN 要求 UA/Referer，酷狗要求自己的 UA，否则裸 GET 会被拒绝。
+    private func makePlayerItem(url: URL) -> AVPlayerItem {
+        if url.host?.contains("qq.com") == true {
+            var headers = [
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0",
+                "Referer": "https://y.qq.com/",
+            ]
+            let cookie = QQMusicAuth.shared.cookieHeader
+            if !cookie.isEmpty { headers["Cookie"] = cookie }
+            let asset = AVURLAsset(url: url, options: [
+                "AVURLAssetHTTPHeaderFieldsKey": headers
+            ])
+            return AVPlayerItem(asset: asset)
+        }
+        if url.host?.contains("kugou.com") == true || url.host?.contains("kgimg.com") == true {
+            var headers = [
+                "User-Agent": "Android15-1070-11440-46-0-DiscoveryDRADProtocol-wifi",
+                "Referer": "https://www.kugou.com/",
+            ]
+            let cookie = KugouMusicAuth.shared.cookieHeader
+            if !cookie.isEmpty { headers["Cookie"] = cookie }
+            let asset = AVURLAsset(url: url, options: [
+                "AVURLAssetHTTPHeaderFieldsKey": headers
+            ])
+            return AVPlayerItem(asset: asset)
+        }
+        return AVPlayerItem(url: url)
     }
 
     /// 网易云播放地址解析：按设置音质取 URL，VIP/灰色歌曲交给第三方解锁（借鉴 Kumone）
@@ -580,42 +857,19 @@ final class PlayerManager: NSObject, ObservableObject {
     }
 
 
-    private func setupPlayer(url: URL, thirdPartyVIPNotice: ThirdPartyVIPNotice? = nil) {
+    private func setupPlayer(url: URL, thirdPartyVIPNotice: ThirdPartyVIPNotice? = nil, resumeAt: Double? = nil) {
+        let item = makePlayerItem(url: url)
+        setupPlayer(player: AVPlayer(playerItem: item), url: url, thirdPartyVIPNotice: thirdPartyVIPNotice, resumeAt: resumeAt)
+    }
+
+    private func setupPlayer(player: AVPlayer, url: URL, thirdPartyVIPNotice: ThirdPartyVIPNotice? = nil, resumeAt: Double? = nil) {
+        guard let item = player.currentItem else { return }
         configureAudioSession()
         #if os(iOS)
         UIApplication.shared.beginReceivingRemoteControlEvents()
         #endif
         removeCurrentObservers()
         pendingThirdPartyVIPNotice = thirdPartyVIPNotice
-        // QQ 官方 CDN（isure.stream.qqmusic.qq.com 等）要求 UA/Referer 请求头，
-        // 否则裸 GET 会被拒绝（403），导致播放成功却无声、进度条不动。
-        let item: AVPlayerItem
-        if url.host?.contains("qq.com") == true {
-            var headers = [
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0",
-                "Referer": "https://y.qq.com/",
-            ]
-            let cookie = QQMusicAuth.shared.cookieHeader
-            if !cookie.isEmpty { headers["Cookie"] = cookie }
-            let asset = AVURLAsset(url: url, options: [
-                "AVURLAssetHTTPHeaderFieldsKey": headers
-            ])
-            item = AVPlayerItem(asset: asset)
-        } else if url.host?.contains("kugou.com") == true || url.host?.contains("kgimg.com") == true {
-            var headers = [
-                "User-Agent": "Android15-1070-11440-46-0-DiscoveryDRADProtocol-wifi",
-                "Referer": "https://www.kugou.com/",
-            ]
-            let cookie = KugouMusicAuth.shared.cookieHeader
-            if !cookie.isEmpty { headers["Cookie"] = cookie }
-            let asset = AVURLAsset(url: url, options: [
-                "AVURLAssetHTTPHeaderFieldsKey": headers
-            ])
-            item = AVPlayerItem(asset: asset)
-        } else {
-            item = AVPlayerItem(url: url)
-        }
-        let player = AVPlayer(playerItem: item)
         player.rate = Float(rate)
         self.player = player
         playbackConfirmed = false
@@ -634,11 +888,27 @@ final class PlayerManager: NSObject, ObservableObject {
                 BeansLogger.shared.log("▶ 播放成功：\(song.name)｜域名=\(url.host ?? "?")", level: .info)
             }
             self.showPendingThirdPartyVIPNoticeIfNeeded()
+            self.preloadUpcoming()
         }
         player.playImmediately(atRate: Float(rate))
         isPlaying = true
         isBuffering = false
         loadFailed = false
+        if let resumeAt, resumeAt > 1 {
+            holdingResume = true
+            progress = resumeAt
+            player.seek(to: CMTime(seconds: resumeAt, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+                guard let self else { return }
+                self.holdingResume = false
+                if finished {
+                    let actual = self.player?.currentTime().seconds ?? resumeAt
+                    if actual.isFinite { self.progress = actual }
+                }
+                self.savePlaybackCheckpoint()
+            }
+        } else {
+            savePlaybackCheckpoint()
+        }
         // 修复：播放次数原先在 loadCurrent 里预计数，URL 加载失败/手动重试也会 +1，
         // 导致统计异常；改为真正开始播放时计数，且同一首歌同一会话只计一次。
         if let song = currentSong, lastCountedSongID != song.identityKey {
@@ -647,10 +917,13 @@ final class PlayerManager: NSObject, ObservableObject {
         }
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self, let player = self.player else { return }
-            if time.seconds.isFinite {
+            if !self.holdingResume, time.seconds.isFinite {
                 if abs(time.seconds - self.lastPublishedProgress) >= 0.18 {
                     self.lastPublishedProgress = time.seconds
                     self.progress = time.seconds
+                }
+                if abs(self.progress - self.lastCheckpointProgress) >= 5 {
+                    self.savePlaybackCheckpoint()
                 }
             }
             if let itemDuration = player.currentItem?.duration, itemDuration.isNumeric {
@@ -662,6 +935,12 @@ final class PlayerManager: NSObject, ObservableObject {
             let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
             if waiting != self.isBuffering {
                 self.isBuffering = waiting
+            }
+            let qualityNow = BeansAudioQuality.current
+            let preparedStale = self.preparedPlayback.map { $0.quality != qualityNow } ?? false
+            let inflightStale = self.inflightPreloadQuality.map { $0 != qualityNow } ?? false
+            if preparedStale || inflightStale {
+                self.preloadUpcoming()
             }
         }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
@@ -850,6 +1129,48 @@ final class PlayerManager: NSObject, ObservableObject {
         if let data = try? JSONEncoder().encode(history) {
             defaults.set(data, forKey: historyKey)
         }
+    }
+
+    /// 记住当前队列和播放到的秒数。下次打开停在这一首，点播放从这里继续。
+    func savePlaybackCheckpoint() {
+        guard !queue.isEmpty, queue.indices.contains(currentIndex) else { return }
+        let snapshot = PlaybackCheckpoint(
+            queue: queue,
+            index: currentIndex,
+            progress: progress.isFinite ? progress : 0,
+            playMode: playMode.rawValue
+        )
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        defaults.set(data, forKey: checkpointKey)
+        lastCheckpointProgress = snapshot.progress
+    }
+
+    private func restorePlaybackCheckpoint() {
+        guard let data = defaults.data(forKey: checkpointKey),
+              let saved = try? JSONDecoder().decode(PlaybackCheckpoint.self, from: data),
+              saved.queue.indices.contains(saved.index) else { return }
+        queue = saved.queue
+        currentIndex = saved.index
+        if let mode = PlayMode(rawValue: saved.playMode) {
+            playMode = mode
+        }
+        buildPlayOrder()
+        if playMode == .shuffle, let pos = playOrder.firstIndex(of: currentIndex) {
+            orderPosition = pos
+        }
+        let song = queue[currentIndex]
+        let seconds = saved.progress.isFinite ? max(0, saved.progress) : 0
+        duration = max(song.duration, seconds)
+        progress = seconds
+        isPlaying = false
+        lastCheckpointProgress = seconds
+    }
+
+    private struct PlaybackCheckpoint: Codable {
+        var queue: [Song]
+        var index: Int
+        var progress: Double
+        var playMode: String
     }
 
     private func loadHistory() {
